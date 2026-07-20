@@ -22,7 +22,12 @@ issue: 1
 | R11 | （検証行為）改修後 checker の陰性対照試走 | V | 計器⑥は検知器そのもの——照合方式の置換に V 級の精神（自己検証禁止・陰性対照）を適用するかは境界裁定（request.md 仮判定 V 欄）。#39 受け入れテストの陰性対照と同型 | 自己検証禁止プロトコル（試走＋独立レビュー） | 新方式（意味突合）で (i) 旧試走実績 D-34/D-40 の再照合が ALIGNED、(ii) 既知違反（作業ツリー上の意図的ドリフト fixture）を DRIFTED として検知、の両方が実証される。checker 自身の PASS 宣言だけで閉じない | 試走記録（台帳）＋codex 独立レビュー | 未了 | — |
 | R12 | moira/examples/todo-playground/.claude/agents/decision-conformance-checker.md | F（境界） | ルート checker 定義の複製が凍結例プレイグラウンド内に存在（掃引で検出）。凍結アーカイブは非同期が既定（#42 移管時の扱い）だが、放置すると新旧定義が同居する | doc-refine（同期する場合）／HA 裁定（非同期のままとする場合） | HA ②の裁定どおり: 非同期のまま（凍結例・現況を主張しない）か、複製も同期するか | HA 裁定記録（非同期の場合）／doc-refine PASS（同期の場合） | 未了 | — |
 
-**再入記録**: なし（初回調査）
+**再入記録**:
+- 2026-07-20 P4 ゲート実行中（doc-refine R1 敵対レビュー）の検出により R13 を追記（codex 指摘——対象 9 ファイル外の取り残し）。ミニ HA は HB（fork-batch F-2）に合流。
+
+| 行 ID | 波及先成果物（パス） | クラス | 根拠 | 担当ゲート | 期待 postcondition | 検証器 | 状態 | 証跡 |
+|---|---|---|---|---|---|---|---|---|
+| R13 | moira/backend/.dependency-cruiser.cjs | C | 冒頭コメント L9 が削除済みの「DECISIONS-CATALOG 被覆マップ ①」を案内（doc-refine R1 codex 指摘 #6。P2 掃引は「変更不要」と誤判定していた） | codex レビュー＋CI（コメントのみの変更・挙動不変） | コメントが現行の割付正典（各エントリの計器タグ・D-78）を案内する | codex レビュー＋CI green | 未了 | — |
 
 ## 人間断面ビュー
 
@@ -63,3 +68,4 @@ issue: 1
 - 来歴文書（改稿しない）: `moira/plans/2026-07-19-change-management-dfd.md`（§8-6 が本 issue の裁定原典）・`moira/plans/2026-07-02-mvp-completion-plan.md`・`moira/changes/issue-39/`・`issue-43/`・`issue-42/`
 - 変更不要と判定: `moira/MODEL.md` L443・`moira/DECISIONS.md` L253（clause→property 被覆の別軸）・`moira/backend/.dependency-cruiser.cjs` L9・`moira/backend/src/pbt/done-lock.pbt.test.ts` L16（D-N 名指しコメントは意味突合の足場として残る）・`CLAUDE.md`・ルート `README.md`・`.kiro/scenarios/units/*`（D-69 定型句）・`.kiro/adr/0003`/`0005`（D 番号参照のみ）
 - 裏面削除で失われる情報（HA への正直開示）: ①判断↔clause ID 対応（77 件）②判断↔実装パス対応（大半）③計器割付の理由説明（29 件）④来歴副情報（コミットハッシュ・ADR 番号・計器資産の稼働状況 18 件）。①②は照合時に AI が毎回導出（本 issue の賭けの本体）、③は導出可能な説明、④は git 履歴・ADR・テストコード内の D-N 名指しコメントに残存
+- 【訂正 2026-07-20・doc-refine R1 敵対指摘】④のうち「計器資産の稼働状況」（緑/RED 等）は D-N コメントに残らないものがあり、出典は git 履歴のみ——「導出可能」の主張を「git 履歴から到達可能」に弱める。また逆方向（変更 path→判断）のトレース足場はテスト未整備の proposed 判断で薄い（steering 正直枠②に開示を追記済み）

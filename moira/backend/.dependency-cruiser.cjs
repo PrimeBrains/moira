@@ -5,8 +5,8 @@
 // boundary yet). So this stage ships TOPOLOGY checks, not the strong CQRS fitness
 // ("core→downstream-value forbidden", "formulas only in evm", "surface reads via
 // seam"). Those land AFTER the physical CQRS decomposition. See
-// .kiro/steering/moira-verification.md (第4器 アーキ適合) and
-// moira/DECISIONS-CATALOG.md 被覆マップ ①.
+// .kiro/steering/moira-verification.md (第4器 アーキ適合) and the per-entry
+// 計器① tags in moira/DECISIONS-CATALOG.md (summary table abolished by D-78).
 //
 // CommonJS (.cjs) is required: the backend is `"type":"module"`, so a plain
 // `module.exports` file must carry the .cjs extension.

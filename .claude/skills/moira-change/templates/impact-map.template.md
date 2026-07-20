@@ -16,8 +16,8 @@ issue: {{ISSUE}}
 
 <!--
   各行は必須項目（steering §2 P2）: クラス・根拠・担当ゲート・期待 postcondition・検証器。
-  根拠列: clause ID（MODEL の安定 A/I/P/R ID・行番号禁止）・DECISIONS-CATALOG 裏面 ref・
-    PROPERTIES の clause→property 被覆・E2E spec の SPEC_META など、P2 が使うトレース機構
+  根拠列: clause ID（MODEL の安定 A/I/P/R ID・行番号禁止）・DECISIONS-CATALOG の判断文・計器タグ
+    からの意味突合・PROPERTIES の clause→property 被覆・E2E spec の SPEC_META など、P2 が使うトレース機構
     （既存・新造なし）からの根拠を記す。ref-list は全列挙（範囲・ワイルドカード禁止 — trace-notation.md 準拠）。
   担当ゲート列: 既存 skill／検証器名（例: moira-model-update, doc-refine, kiro-scenario,
     kiro-scenario-flow, kiro-scenario-e2e, decision-conformance, /kiro-impl 等）。

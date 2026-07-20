@@ -68,8 +68,8 @@ sonnet worker（subagent）へ派遣してよいが、**クラス判定・ルー
 ### 2. P2 影響調査
 
 1. トレース機構（**既存・新造なし**）を機械的に辿って波及先成果物を列挙する: MODEL の安定 clause ID
-   （A/I/P/R——行番号禁止）／DECISIONS-CATALOG 裏面 ref と計器被覆マップ（**変更 path → 裏面 ref の
-   逆引き＝①パス片・ファイル名で目録全文 grep ②ヒット近傍を AI が意味的に突合**）／PROPERTIES の
+   （A/I/P/R——行番号禁止）／DECISIONS-CATALOG の判断文と計器タグ（**変更 path → 関係判断の同定は
+   AI の意味突合。テストコード内 D-N 名指しコメント等を足場にしてよい**）／PROPERTIES の
    clause→property 被覆／E2E spec の SPEC_META／`moira/frontend/e2e/coverage-check.test.ts` の被覆定義。調査は
    sonnet worker へ並列派遣してよい。
 2. `templates/impact-map.template.md` から `moira/changes/issue-N/impact-map.md` を起こす。**各行に
@@ -143,8 +143,8 @@ sonnet worker（subagent）へ派遣してよいが、**クラス判定・ルー
    verdict→3値写像は **steering §5 が正**（本スキルは複製しない）。要点のみ: resolved には行指定の
    検証器の証跡が要る——コミットの存在だけでは resolved にできない。照合は sonnet worker へ派遣して
    よい。
-3. **検査は関係分のみ**: `decision-conformance`／`doc-fact-checker` は「影響マップ範囲＋逆引きヒット分」
-   に限定（全量掃射しない）。
+3. **検査は関係分のみ**: `decision-conformance`／`doc-fact-checker` は「影響マップ範囲＋意味突合で
+   同定した関係判断分」に限定（全量掃射しない）。
 4. **未マップ差分の非存在**を確認する（比較の操作的定義）: **changed** ＝ `git diff --name-only
    <base>..HEAD` のリポジトリルート相対パス集合（**rename 検出は使わない**——rename は削除＋追加として
    旧新両パスが現れる。削除ファイルも含む）、**mapped** ＝ 影響マップ「波及先成果物」列のパス集合

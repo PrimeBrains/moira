@@ -45,7 +45,7 @@ moira/
 ├── MODEL.md                  # 正典モデル(SSOT)。公理・4イベント・不変条件・原理・EARS 要件・来歴
 ├── NAMING.md                 # 名称と由来(専門家レビュー済み)
 ├── DECISIONS.md              # 意思決定ジャーナル(確定済み分岐・未解決論点・次の一手)
-├── DECISIONS-CATALOG.md      # 設計判断の目録(D-1〜)と裏面 ref・計器割付
+├── DECISIONS-CATALOG.md      # 設計判断の目録(D-1〜)と計器割付タグ（判断↔実装の対応は照合時に AI が導出・D-78）
 ├── PROPERTIES.md             # 不変条件のプロパティ化(PBT/モデル検査の供給源)
 ├── validation-scenarios.md   # 検証シナリオ S1–S15(MODEL が「使えるか」の検分)
 ├── UI-ARCHITECTURE.md        # 画面アーキの橋渡し設計(導出×警告→サーフェス被覆表)
