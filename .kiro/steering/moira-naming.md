@@ -20,7 +20,7 @@
 | `MD` | man-day = 人間アテンション時間。Moira の単一通貨 | A6 |
 | `proposed` / `agreed` | 見積の状態。`agreed` への遷移は人間のみ | §2.2 / R-U4 |
 | `implemented` | = 実装完了 ∧ 仕様FIX。**判定であって保証ではない** | §2.5 / P5 |
-| `accepted` / `cancelled` | 完了（品質確認）/ 終端取消（どの非終端からも到達可） | §2.5 |
+| `accepted` / `cancelled` | 完了（品質確認）/ 終端取消（どの非終端からも到達可。終端性は状態機械の性質として不変——誤 cancel の回復は un-cancel でなく記録訂正 §2.10・v21） | §2.5 |
 | supersede | 置換辺（新→旧）。エンハンスでの既存変更。**cancel とは別** | §2.7 / R-D7 |
 | cancel | 終端取消。active basis から除外（サンク EV_abs は導出する） | R-C1 / R-C2 |
 | 現行有効集合 | supersede されていない葉。累積 EV_abs と区別して読む | R-S5 / §2.7 |

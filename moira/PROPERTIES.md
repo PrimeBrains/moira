@@ -1,6 +1,6 @@
-# Moira プロパティ目録（不変条件カタログ）v0.4
+# Moira プロパティ目録（不変条件カタログ）v0.5
 
-状態: **54プロパティ＝51 agreed＋3 proposed（要批准）**。要批准 3 件＝ PR-REPARENT-HEAL・PM-TREE-INV（v20 所属の latest-wins 由来・bb81ff2 で収載済み）・PR-THRASH（R-S3 の畳んだレビュー carve-out 追随のため `agreed` から再降格）。v0.3 時点の52件は全件人間批准済み。方針は [.kiro/steering/moira-verification.md](../.kiro/steering/moira-verification.md)、正典は [MODEL.md](MODEL.md)。
+状態: **54プロパティ＝49 agreed＋5 proposed（要批准）**。要批准 5 件＝ PR-REPARENT-HEAL・PM-TREE-INV（v20 所属の latest-wins 由来・bb81ff2 で収載済み）・PR-THRASH（R-S3 の畳んだレビュー carve-out 追随のため `agreed` から再降格）・**PR-DONE-LOCK・PR-EVENTS-ONLY（v21 普遍訂正原則〔§2.10 訂正層〕追随のため `agreed` から再降格——改訂＝再批准の自己規律。issue #2）**。v0.3 時点の52件は全件人間批准済み。方針は [.kiro/steering/moira-verification.md](../.kiro/steering/moira-verification.md)、正典は [MODEL.md](MODEL.md)。
 
 本目録は、MODEL の不変条件（オラクル）を**人間がレビューできる平易な一文**に落とし、実行可能なテスト（PBT・境界モデル検査・否定）の**一次仕様**とするもの。実行テストはこの一文の形式化した射影を目指す。
 
@@ -25,7 +25,7 @@
 | ID | 根拠 | 人間がレビューする一文 | 固定する量 | 意図的に FREE | レビュー |
 |---|---|---|---|---|---|
 | PR-EVPCT-RANGE | R-U8・P1 | **見積に人が合意しないまま完了した作業は、出来高(EV)として計上しない**（EV は合意済み領域だけを語り、未合意分はカバレッジ低下として可視化）。その結果、達成率 EV% は常に 0〜100% に収まる（合意済みがゼロなら EV%=0 と定義） | EV%∈[0,1]／未合意完了は EV_abs 非算入／分母 0 時 EV%=0 | 具体的な EV% 値・木の形 | agreed |
-| **PR-DONE-LOCK** | I4・R-E3 | いったん**完了して出来高が確定した**作業の出来高(EV_abs)は、後から何をしても**額自体は減らない**（キャンセルで active→sunk に分類が移ることはあるが額は不変——分類は PR-CANCEL-SUNK）。完了済みを変えたいときは**新しい行を立てて差し替え**（旧行の出来高は累積に残る）。見積のやり直しで出来高や率が動くのは、**まだ完了していない**作業だけ | 完了ノードの EV_abs 不変（額） | 未完了ノードの EV%・カバレッジは動いてよい | agreed |
+| **PR-DONE-LOCK** | I4・R-E3・§2.10 | いったん**完了して出来高が確定した**作業の出来高(EV_abs)は、**見積のやり直し・作り直し・キャンセルなど「考えが変わった」操作では減らない**（キャンセルで active→sunk に分類が移ることはあるが額は不変——分類は PR-CANCEL-SUNK。完了済みを変えたいときは**新しい行を立てて差し替え**）。唯一の例外は**記録の誤りの訂正**（理由必須・計器に常設表示される「音の鳴る」修理）——黙って減る経路は存在しない。見積のやり直しで出来高や率が動くのは、**まだ完了していない**作業だけ | 完了ノードの EV_abs は訂正以外で不変（額）・訂正経由の変化は計器に常設表示 | 未完了ノードの EV%・カバレッジは動いてよい | proposed（v21 追随・再降格。実装は issue #6 まで従来挙動=全拒否） |
 | PR-I1-ROLLUP | I1 | 親の見積は、**合意済みの子**の見積の合計に一致する。まだ見積もっていない子は『カバレッジ低下』として現れ、整合の破れにはしない | 親=Σ(合意済み子) | 未見積子の存在（カバレッジで表現）・木の深さ | agreed |
 | PR-AC-ROLLUP | P3 | 実コスト(AC)はツリーを下から積み上げた合計。各ノードのACは「**そのノードに直接付いたコスト＋子のACの合計**」で、コストは普通*実際に作業する葉*に付くため、集約だけの親ノードのACは実質「子のACの合計」になる | AC=自コスト+ΣAC(子)（任意の木で成立） | 具体額・どのノードにコストが付くか | agreed |
 | PR-CANCEL-EXCL | R-C2 | タスクをキャンセルしても、有効分の出来高(EV_abs)は**増えない**。キャンセルは稼働対象から外れる | EV_abs 非増・active basis 除外 | サンク EV_abs の値 | agreed |
@@ -46,7 +46,7 @@
 | **PR-ASSIGNEE-REVIEWER** | R-T5・§2.4・§7#18(b) | 一つの作業の担当者(assignee)は**常に一人**で、新しく名指すと前の担当を置き換える。レビュー担当(reviewer)の**指名そのもの**は担当者とは別枠・人間限定で、名指しても容量平準化・出来高(EV)・予定価値(PV)・各カバレッジは**一切動かない**。ただし『動かない』のは*指名*の話であって、レビュー*作業そのもの*を（重ければ）通常の作業ノードとして立てた場合は、それは普通の作業ノードとして——その作業ノードの担当(assignee)を通じて——出来高・平準化に参加する（reviewer 指名の非干渉とは別物；軽ければ畳んで被レビューノードに cost 計上） | 担当(assignee)単一・latest-wins／reviewer *指名属性* は人間限定・別軸・会計非干渉（leveler/EV/PV/coverage を動かさない）／レビュー*作業ノード*化時の会計参加は当該作業ノードの assignee によるもので reviewer 属性とは別 | 担当・reviewer の具体人物・レビュー作業のノード化/畳み(P0) | agreed |
 | **PR-FROZEN-REASON** | R-U7 | 見積は「**最新値**」と「**理由付きの凍結値**」を別々に持ち、凍結値を書き換えるときは必ず理由を要する | 最新値と凍結値を別保持・凍結改訂は理由必須 | 具体値・理由文言 | agreed |
 | **PR-SUPERSEDE-SHAPE** | R-D7・§2.7・I2 | 完了済みを作り直すときは、古いノードを巻き戻さず、**新しいノードを立てて「新→旧」の置換辺**を張る。古いノードはそのまま不変で、その出来高は累積に残る。置換辺が循環を作ることはない | 置換=新ノード＋新→旧辺・旧不変・非循環 | ノード数・辺の数 | agreed |
-| **PR-EVENTS-ONLY** | R-U2・A2・R-U1・§2.8 | 状態の変化は **4 種類の追記イベントだけ**で起こり、保存済みの状態を直接書き換えることはできない（同じイベント列を再生すれば同じ状態になる） | 状態変化=4 イベントのみ・直接変更拒否・再生決定的 | イベント内容 | agreed |
+| **PR-EVENTS-ONLY** | R-U2・A2・R-U1・§2.8・§2.10 | 状態の変化は **4 種類の追記イベント＋記録の訂正（追記専用の第二層）だけ**で起こり、保存済みの状態やイベントを直接書き換えることはできない（同じイベント列＋同じ訂正列を再生すれば同じ状態になる。訂正はイベントを書き換えず「読み」を補正する） | 状態変化=4 イベント＋訂正層の適用後読みのみ・直接変更拒否・再生決定的 | イベント内容 | proposed（v21 追随・再降格。実装は issue #6 まで訂正層なし） |
 | **PR-REPARENT-HEAL** | §2.8(所属の latest-wins)・A2 | 間違った親に付けてしまった作業は、**正しい親の下へもう一度 decompose するだけ**で元に戻る（歴史は消さず追記で補償）。戻したあとの導出は、間違いが一度も無かった場合と一致する（履歴表示を除く） | 誤親付け＋補償再 decompose ≡ クリーンログ（activityLog 除く全導出の深い等価）・非空虚 witness（誤りが実際に木を動かしたこと） | 木の形・どの葉を誤親付けするか | proposed |
 | **PR-THRASH** | R-S3 | 出来高(EV_abs)が増えないのに実コスト(AC)が**一定期間ずっと増え続ける**ときは空回りとして警告する。一方、**畳んだ見積作業または畳んだレビュー作業**のコストが一度だけ載るのは正常で、それ単独では警告しない | 持続的 AC 増＋EV_abs 不増→警告／単発の畳みコスト（見積・レビューとも）は非警告 | 閾値・期間長 | proposed |
 | **PR-BUFFER-CLAMP ★** | R-T6・§3・R-T4 | バッファ残量は「**期日 − 見通し完了日**」で、マイナスにはせず 0 で止める（超過分は期日超過の警告側が持つ）。期日が無ければバッファは未定義、目標日が無ければ消費率は出さず残量のみ、目標日が期日より後なら構成エラーとして警告する | 残量=max(0,期日−D_pred)・消費率 clamp[0,1]・境界条件（期日/目標日の有無で N/A） | 具体日付・D_pred 絶対値 | agreed |
@@ -134,7 +134,7 @@
 | clause | bound by | 備考 |
 |---|---|---|
 | A1 | （D 節：構造公理） | PR-EVENTS-ONLY(R-U2)・PR-I1-ROLLUP(I1) が間接被覆 |
-| A2 | PR-CANCEL-SUNK・PR-EVENTS-ONLY・PR-REPARENT-HEAL | 追記専用——PR-EVENTS-ONLY が直接 bind、PR-CANCEL-SUNK がコスト保持・PR-REPARENT-HEAL が「補償も追記」で間接 |
+| A2 | PR-CANCEL-SUNK・PR-EVENTS-ONLY・PR-REPARENT-HEAL | 追記専用——PR-EVENTS-ONLY が直接 bind、PR-CANCEL-SUNK がコスト保持・PR-REPARENT-HEAL が「補償も追記」で間接。v21: A2 射程改訂（導出=ログ＋訂正層 §2.10）は PR-EVENTS-ONLY の改訂一文が追随（proposed） |
 | A3 | MC-CYCLE-REJECT・PR-I1-ROLLUP・PM-TREE-INV | 木（価値集約=I1・単一有効親と非循環=PM-TREE-INV〔v20 所属の latest-wins〕）＋DAG（非循環=I2/R-D3）の二重グラフ |
 | A4 | PR-CAP-DOMAIN・PR-CAP-HISTORY・PM-CAP-MONO | c の定義域・履歴・容量効果 |
 | A5 | PR-AGENT-UNLEVELED・MC-AGREE-HUMAN | 資源（人間のみ平準化）＋権限（人間のみ合意）。表現の対称は D 節 |
@@ -147,7 +147,7 @@
 | I1 | PR-I1-ROLLUP・PR-COVERAGE-LEAF | ロールアップ整合・葉基底カバレッジ |
 | I2 | MC-CYCLE-REJECT・PR-SUPERSEDE-SHAPE | 非循環（全辺種別） |
 | I3 | PM-ORDER-INV・MC-CONFLICT・MC-IDUNIQ・PM-REDERIVE-CONSISTENT・PM-TREE-INV | (ts,id) 決定的順序 |
-| I4 | PR-DONE-LOCK・MC-UNAGREED-DONE | 完了施錠・未合意完了の空虚成立 |
+| I4 | PR-DONE-LOCK・MC-UNAGREED-DONE | 完了施錠・未合意完了の空虚成立。v21: 施錠の精密化（「黙っては変わらない」——訂正 carve-out）は PR-DONE-LOCK の改訂一文が追随（proposed）。**§2.10 訂正層自体の bound プロパティは未起票**（実装 pending・issue #6——実装同期時に PBT/一文を起票する。可視ギャップとして正直開示） |
 | I5 | MC-MACHINE-NAMED | 遷移の被指示性 |
 | I6 | MC-AGREE-HUMAN | 合意権限（人間のみ） |
 
@@ -311,8 +311,20 @@ bound＝falsifiable プロパティ（PBT/MC/DENY）が根拠として引く cla
 
 版の規律: 件数・批准状態・★ の意味に触れる変更のため v0.4 に上げる（binding 不変でも版据え置きにしない）。**v0.4 の批准は上記 3 件の一文レビュー**（下記「次手」）。
 
+## v0.4→v0.5 変更点（2026-07-20・issue #2 MODEL v21 普遍訂正原則への追随）
+
+MODEL v21（§2.10 訂正層の新設・A2 射程改訂・I4 精密化「完了済みは、黙っては変わらない」）への bound プロパティ同一 run 再批准（moira-model-update ゲート内・HA 批准 R4）。プロパティの新規追加はなし。
+
+1. **PR-DONE-LOCK の一文改訂＋再降格**: 「後から何をしても減らない」→「考えが変わった操作では減らない。唯一の例外は記録の誤りの訂正（音の鳴る修理・計器常設表示）——黙って減る経路は存在しない」。根拠に §2.10 を追加。`agreed`→`proposed`（改訂＝再批准の自己規律）。
+2. **PR-EVENTS-ONLY の一文改訂＋再降格**: 「4 種類の追記イベントだけ」→「4 イベント＋記録の訂正（追記専用の第二層）だけ。訂正はイベントを書き換えず読みを補正する」。根拠に §2.10 を追加。`agreed`→`proposed`。
+3. **移行状態の正直注記**: 参照実装は追跡 issue #6 完了まで v20 挙動（訂正層なし・done-lock 全拒否）のまま——改訂 2 行の「訂正経由」句は実装到達まで実効しない（PBT は従来挙動のまま GREEN。実装同期時に改訂）。
+4. **被覆表の同期**: A2 行・I4 行に v21 追随注記。**§2.10 訂正層自体の bound プロパティは未起票**（実装 pending・issue #6 で PBT/一文を起票）——可視ギャップとして開示。
+5. cancel 系（PR-CANCEL-SUNK/EXCL/INVISIBLE・MC-CANCEL-TERMINAL・MC-SUP-CANCEL）・PR-SUPERSEDE-SHAPE・DN-MONOTONIC は一文が v21 でも字義どおり真のまま（終端性は状態機械の性質として不変・supersede は意味的変更の正道のまま）——無改訂・批准状態不変。
+
+版の規律: 件数・批准状態に触れるため v0.5 に上げる。
+
 ## 次手（批准）
 
-1. **v0.4 の要批准 3 件**: PR-REPARENT-HEAL・PM-TREE-INV（v20 所属の latest-wins 由来）・PR-THRASH（R-S3 の畳んだレビュー carve-out 追随・`agreed` からの再降格）。一文レビューで `agreed` へ。
+1. **v0.5 の要批准 5 件**: PR-REPARENT-HEAL・PM-TREE-INV（v20 所属の latest-wins 由来）・PR-THRASH（R-S3 の畳んだレビュー carve-out 追随・`agreed` からの再降格）・**PR-DONE-LOCK・PR-EVENTS-ONLY（v21 訂正層追随・`agreed` からの再降格）**。一文レビューで `agreed` へ。
 2. 既往: v0.3 の52プロパティは人間批准済み。最小パイロット（PBT）は稼働済み——PR-DONE-LOCK は実装是正（2026-07-02・fold 完了ガード）で GREEN 回帰固定に昇格済み。以後、MODEL の制約・語彙・既定に触れる変更があれば、その bound プロパティを同一 run で再批准する（`moira-model-update`／`doc-refine`）。
 3. **★impl-pending プロパティ**（R-T3 過負荷・R-T6 バッファ数値導出・R-S7 標識発火）は参照実装に当該導出が実装された時点で PBT/MC 化する。★ を外した MC-DEADLINE-ALERT・MC-CANCEL-ORPHAN の MC テスト化も後続。

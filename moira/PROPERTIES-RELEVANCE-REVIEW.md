@@ -162,5 +162,6 @@
 - J1：AC は subtree Σ ownCost のみに依存し、estimate-agreement / lifecycle に直交。
 - S5：`arbNoCollapse` で supersede/cancel を領域から除外（group node が effective leaf に collapse し leaf-count coverage を正当に動かすため。MC-SUP-CANCEL の領域）。
 - S6：完了 revert は非整形式（R-E3 は未完了限定）。範囲性は破れず、捕捉は PR-DONE-LOCK の役。
+- v21 追随注記（2026-07-20・issue #2）：MODEL v21 で I4 は「完了済みは、黙っては変わらない」へ精密化され、PR-DONE-LOCK の一文は訂正 carve-out 付きへ改訂・`proposed` 再降格（PROPERTIES v0.5）。本表の I4 行・done-lock 生成器の対応は**実装が v20 挙動（全拒否）の間は従来どおり有効**——訂正層の実装（issue #6）到達時に本表・done-lock.pbt.test.ts を同時改訂する（移行状態の正直開示）。
 - K：`estimateCoverage = (estimateState==='agreed' の葉数) / (有効な葉数)`（`coverage.ts: computeEstimateCoverage`）。母数は「合意済み」基準ゆえ、見積り有・合意無（状況3）は未見積り（状況1）と同じく「合意なし」に畳まれる。加えて状況3は R-U4 の structural error を持ち込むため、I1 の「整合は壊れない」確認には状況1が綺麗。
 - 「対象の作業」＝ effective leaves／「差し替え」＝ supersede（R-D7 new→old）／「試す状況の自動生成」＝ 生成器（arbitrary, fast-check）。
