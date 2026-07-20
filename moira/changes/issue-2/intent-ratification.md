@@ -69,4 +69,4 @@ When/Then（ふるまい本体）に触れず、かつ後続 issue へ deferred 
 
 ## issue コメントへの要約
 
-- issue コメント: （HA 確定後に記載）
+- issue コメント: https://github.com/PrimeBrains/moira/issues/2#issuecomment-5021777257
