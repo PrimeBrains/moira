@@ -1,0 +1,65 @@
+---
+status: working-ledger
+issue: 11
+---
+
+# 影響マップ — issue #11
+
+## 波及先一覧
+
+| 行 ID | 波及先成果物（パス） | クラス | 根拠 | 担当ゲート | 期待 postcondition | 検証器 | 状態 | 証跡 |
+|---|---|---|---|---|---|---|---|---|
+| R1 | moira/MODEL.md | M | §2.10 (d) 計器定義文の③「遡及訂正（対象イベントの ts を現行の読みより過去へ動かす訂正）」——(1) HA B5 批准済み統合（issue #36 遡及書き込み警告を③に吸収・「訂正跨ぎと遡及書き込みは同じ計器を鳴らす」issue-6 intent-ratification B5）は現行定義文の字義（訂正スコープ）を超える。(2) #6 実装の③述語（fold.ts RETROACTIVE_THRESHOLD_MS: 対象 ts より 1 日超後着の訂正）が現行定義文と不一致（正典↔実装ドリフトの先行発見） | moira-model-update | §2.10 (d) の③定義が B5 裁定・参照実装意図（1 日閾値）を含めて整合的に確定し、派生文書同期（journal・§7 追跡）が済む | moira-model-update ゲート PASS（敵対ゲート＋moira-gate-judge・意図整合検査） | 未了 | — |
+| R2 | moira/PROPERTIES.md（PR-DONE-LOCK） | P | #6 R11 継承（I4・R-E3・§2.10）。一文は v0.5 で改訂済み・proposed。PBT witness 完備（done-lock.pbt.test.ts v21 carve-out 3 件・cbfdeb8） | moira-model-update 内 bound プロパティ再批准（同一 run 規律・HA 事前批准） | 一文（現行 v0.6 文面のまま）が agreed へ昇格 | HA 批准記録＋PBT green＋同一 run 再批准記録 | 未了 | — |
+| R3 | moira/PROPERTIES.md（PR-EVENTS-ONLY） | P | #6 R12 継承（R-U2・A2・§2.8・§2.10）。一文は v0.5 で改訂済み・proposed。witness は correction.test.ts §2.10 (a)〜(h)＋意味論一行原理（cbfdeb8） | 同上 | 一文（現行 v0.6 文面のまま）が agreed へ昇格 | HA 批准記録＋PBT green＋同一 run 再批准記録 | 未了 | — |
+| R4 | moira/PROPERTIES.md（PR-CORRECTION-METER ★） | P | #6 R13 継承（§2.10 (d)・§3・§2.1）。一文は v0.6 で起票済み・proposed——B5 統合（③への吸収・二重表示回避）を既に織り込んだ文面。witness は correction.test.ts (g) 4 件＋done-lock.pbt.test.ts「計数除外オプションなし」 | 同上 | 一文が agreed へ昇格＋★impl-pending 解除（backend 実装到達済み・witness green——v0.3→v0.4 の MC 系★解除と同じ前例） | HA 批准記録＋PBT green＋同一 run 再批准記録 | 未了 | — |
+| R5 | moira/PROPERTIES.md（版規律・被覆表・件数行） | P | PROPERTIES 規約「件数・批准状態に触れるため版を上げる」——批准状態が 49 agreed＋6 proposed → 52 agreed＋3 proposed に変わる | 同上（ゲート内編集） | v0.6→v0.7: 冒頭件数行・I4/A2 被覆行の（proposed）注記解消・「次手」節更新・v0.6→v0.7 変更点節の追加 | 照合 subagent による表整合確認（doc-fact-checker・影響マップ範囲） | 未了 | — |
+| R6 | moira/cli/src/commands.ts | C | #6 R7 継承。MODEL §2.10 (a)(b)(c)。cmdCorrect 新設（case 'correct'）・cmdReport が corrections を buildReport へ渡していない現状（correction meter 行が常時ゼロ）の解消・cmdLog がイベント id を表示しない UX ギャップ | /kiro-impl（worker=sonnet）＋codex＋CI | `moira correct <event-id> --reason --patch k=v…/--nullify` 実装（reason 必須検証・confirmDestructive 再利用・locked target の事前 fold 判定と警告・--yes バイパス・非 TTY 素通し）＋cmdReport への corrections 配線＋id 発見手段（log 出力 or --json 案内） | 単体テスト・codex レビュー・CI 計器①②③④ | 未了 | — |
+| R7 | moira/cli/src/store.ts | C | #6 R7 継承。MoiraRepo に correctionsPath が無い（corrections.json 永続化層の欠落） | /kiro-impl＋codex＋CI | correctionsPath＋loadCorrections/appendCorrections（dates.json 型の追記パターン）＋init() での `[]` seed | 単体テスト・codex レビュー・CI | 未了 | — |
+| R8 | moira/cli/src/report.ts | C | HA B5 完全配線（#6 R10 の残注記「配線は今後」）。formatReportText の二重表示（498-505 ⚠遡及記録 と 507-518 ⚠訂正記録 が背中合わせ）・ReportJson.retroactive と correctionMeter の二重フィールド | /kiro-impl＋codex＋CI | ⚠遡及記録 セクションを訂正計器行へ吸収し単一表示化（表現は HA 受け入れ基準に従う）。corrections が meter に反映される | 単体テスト・codex レビュー・CI | 未了 | — |
+| R9 | moira/cli/src/report.test.ts | C | 377-405 が現行二重表示の文言を固定（「正常時は遡及に言及しない」含む）。訂正計器行の render path は現在テストゼロ | /kiro-impl＋codex＋CI | issue #36 アサーションを統合後表示へ改稿＋訂正計器行の新規カバレッジ | テスト green・codex レビュー・CI | 未了 | — |
+| R10 | moira/backend/src/fold.ts・moira/backend/src/types.ts | C | R1 で確定する③意味論の実装同期（遡及イベント書き込みの計上経路を含む——types.ts:180-190 コメントは目標状態を既に記述） | /kiro-impl＋codex＋CI | ③の計数が確定した正典定義に一致（correction 遡及 OR 遡及イベント書き込み） | 単体テスト・PBT・codex レビュー・CI | 未了 | — |
+| R11 | moira/backend/src/correction.test.ts | C | R10 の意味論変更に伴う (g) 計器テストの更新・③拡張の witness 追加 | /kiro-impl＋codex＋CI | ③の新意味論を非空虚に witness | テスト green・CI | 未了 | — |
+| R12 | moira/frontend/src/surfaces/health/HealthSurface.tsx | C | ③ゾーン（100-106）のサブラベル「対象イベントより1日以上後に発行された訂正」と脚注 119「統合予定（配線は今後）」が新意味論と不整合になる | /kiro-impl＋codex＋CI | ③ゾーンの文言を新意味論へ更新・「配線は今後」脚注を撤去 | 単体テスト・tsc・codex レビュー・CI | 未了 | — |
+| R13 | moira/cli/src/（新規 correct コマンドテストファイル） | C | R6 の非空虚 witness（commands-write-safety.test.ts の confirm ゲート規約と互換であること） | /kiro-impl＋codex＋CI | patch/nullify・reason 欠落拒否・locked 警告・--yes・非 TTY 素通しをテストで固定 | テスト green・CI | 未了 | — |
+| R14 | moira/frontend/src/moira/backend-runtime.d.ts ほか frontend 型伝播 | C | R10 で fold/derive の入力が変わる場合の型同期（#6 R17 と同型） | /kiro-impl＋codex＋CI | frontend tsc 0 errors・テスト green（シグネチャ不変なら変更なしの確認） | tsc・テスト green・CI | 未了 | — |
+| R15 | moira/DECISIONS-CATALOG.md（D-79 状態注記） | F | D-79:654 の残工程注記「CLI 書き込み UX…report Δ の訂正跨ぎ表示（issue #36 遡及警告の統合含む）は issue #6 の残工程」が本 issue で解消される | doc-refine（F 級・文書ゲート内で批准） | D-79 の実装状態注記を「CLI UX・report 統合 実装完了」へ更新（agreed 昇格可否は doc-refine 判断） | doc-refine ゲート verdict | 未了 | — |
+| R16 | moira/DECISIONS-CATALOG.md（D-1 状態注記） | F | D-1:33 の残工程注記「CLI 書き込み UX と frontend 常設ゾーン表示は issue #6 の残工程」が本 issue で解消される | doc-refine（F 級） | D-1 の実装状態注記を実装完了へ更新 | doc-refine ゲート verdict | 未了 | — |
+
+調査済みで**行を立てない**もの（正直開示）: `.kiro/scenarios/units/`・`flows/`（§3/§6 に訂正・遡及・report 出力への言及なし——ヒット 3 件は全て決定注記/別義）、`moira/frontend/e2e/`（訂正計器 testid・report への参照ゼロ・E2E は frontend 専用で CLI 出力を見ない）、golden テスト群（report/訂正への参照なし）、V 級（検知器変更なし）。
+
+## 人間断面ビュー
+
+### レビュー対象（シナリオ・プロパティ・設計判断の3面のみ）
+
+| 行 ID | 波及先 | 平易文（何が変わるか） | 状態 |
+|---|---|---|---|
+| R1 | 正典モデル（計器の定義） | 訂正計器の「遡及」区分の意味を確定させる。いま正典は「対象の日時を過去に動かす訂正」と書いているが、(1) すでに批准済みの統合方針（B5）は「過去日付へのイベント追記（遡及書き込み）でも同じ計器を鳴らす」ことを求めており、(2) 実装は「対象より 1 日超あとに出された訂正」を数えている——三者がずれている。この「遡及」の数え方を一本化して正典に書く | 未了 |
+| R2 | プロパティ（完了施錠） | 「完了した作業の出来高は、考えが変わった操作では減らない。唯一の例外は音の鳴る訂正」という一文（文面は確定済み）を、あなたの意図として批准し agreed にする | 未了 |
+| R3 | プロパティ（追記だけで状態が決まる） | 「状態の変化は 4 種類の追記イベント＋訂正の第二層だけで起こり、保存済みを直接書き換えることはできない」という一文（文面は確定済み）を批准し agreed にする | 未了 |
+| R4 | プロパティ（訂正の数え方に裁量なし） | 「訂正の 4 区分は常に見える形で数え、特定の訂正を名目を付けて数から除くことはできない。遡及書き込み警告はこの計器の③に統合」という一文（文面は確定済み）を批准し agreed にする。あわせて「実装待ち」印（★）を外す（実装は #6 で到達済み・テストあり） | 未了 |
+| R5 | プロパティ目録の版 | 批准状態が変わる（agreed 49→52）ため版を v0.6→v0.7 に上げ、目録内の件数・注記を同期する | 未了 |
+
+### 文書ゲート内で批准（HA 対象外）
+
+| 行 ID | 波及先 | 批准の所在 |
+|---|---|---|
+| R15 | 設計判断目録（D-79 の実装状態注記） | doc-refine ゲート内 |
+| R16 | 設計判断目録（D-1 の実装状態注記） | doc-refine ゲート内 |
+
+### 人間はレビューしない（codex＋CI に委譲）
+
+以下は本フローの人間タッチポイント（HA・HB・H5）でのレビュー対象**ではない**——ソースコード・
+テストコード（C級）の機械決着行であり、codex レビューおよび CI（計器①②③④）に委譲する。
+
+| 行 ID | 波及先 | クラス |
+|---|---|---|
+| R6 | moira/cli/src/commands.ts | C |
+| R7 | moira/cli/src/store.ts | C |
+| R8 | moira/cli/src/report.ts | C |
+| R9 | moira/cli/src/report.test.ts | C |
+| R10 | moira/backend/src/fold.ts・types.ts | C |
+| R11 | moira/backend/src/correction.test.ts | C |
+| R12 | moira/frontend/src/surfaces/health/HealthSurface.tsx | C |
+| R13 | moira/cli/src/（新規 correct テスト） | C |
+| R14 | moira/frontend/src/moira/backend-runtime.d.ts ほか | C |
