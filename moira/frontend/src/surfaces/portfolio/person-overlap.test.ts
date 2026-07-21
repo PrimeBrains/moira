@@ -25,6 +25,7 @@ function mkNode(partial: Partial<ProjectedNode> & { id: string }): ProjectedNode
     ownCost: 0,
     parent: null,
     agreedActorValues: new Map(),
+    claimedParentByActor: new Map(),
     ...partial,
   };
 }

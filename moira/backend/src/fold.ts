@@ -50,6 +50,7 @@ function emptyNode(id: NodeId): ProjectedNode {
     ownCost: 0,
     parent: null,
     agreedActorValues: new Map(),
+    claimedParentByActor: new Map(),
   };
 }
 
@@ -431,6 +432,14 @@ function applyDecompose(
     if (child.estimate !== undefined) cn.latestEstimate = child.estimate;
     if (!kids.includes(child.node)) kids.push(child.node);
     state.childrenOf.set(ev.parent, kids);
+    // v21 §2.8 contested-containment warning support: record this HUMAN
+    // actor's parent claim for this child. R-U12-isomorphic — only humans
+    // are compared (agent decomposes still update the effective parent above
+    // via latest-wins, but don't contribute a distinct claim to the warning
+    // register; the warning is about people disagreeing, not agents).
+    if (ev.actor.kind === 'human') {
+      cn.claimedParentByActor.set(ev.actor.id, ev.parent);
+    }
   }
 }
 

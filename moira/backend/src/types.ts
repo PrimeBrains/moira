@@ -225,6 +225,13 @@ export interface ProjectedNode {
   ownCost: number; // Σ deduped cost (P3)
   parent: NodeId | null;
   agreedActorValues: Map<string, number>; // per distinct human's latest agreed value (R-U12 context)
+  // Per distinct HUMAN actor's latest `decompose` claim of THIS node's parent
+  // (v21 §2.8 contested-containment warning support — R-U12-isomorphic detector).
+  // Populated by fold on every decompose that names this node as a child, keyed
+  // by the emitting actor's id. Only human actors are recorded (I6-isomorphic
+  // discipline — the R-U12 pattern is human-only). Agent decomposes update the
+  // effective parent (latest-wins) as before but don't enter this register.
+  claimedParentByActor: Map<string, NodeId>;
 }
 
 export interface ProjectedState {

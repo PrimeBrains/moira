@@ -35,6 +35,7 @@ import {
   derive,
   sortEvents,
 } from 'moira-backend';
+import type { Correction, CorrectionMeterCounts } from 'moira-backend';
 import { fmt, pct } from './format.js';
 import type { ReferenceDates } from './store.js';
 
@@ -56,6 +57,12 @@ export interface ReportOptions {
    * optional-section discipline, same as an empty `features`/`series`).
    */
   milestones?: readonly MilestoneDefinition[];
+  /**
+   * v21 §2.10 correction layer (optional). When omitted, the report behaves
+   * byte-identically to the pre-v21 form; `correctionMeter` on the output
+   * stays all-zeros (honest "no corrections").
+   */
+  corrections?: readonly Correction[];
 }
 
 /** One as-of point of the pair-read metric set. */
@@ -110,6 +117,17 @@ export interface ReportJson {
   /** Retroactive-append warning (issue #36) — null in normal operation
    *  (honest silence); see buildRetroactiveWarning. */
   retroactive: RetroactiveWarning | null;
+  /**
+   * v21 §2.10 (d) correction meter — 4 permanent categories (常設・no
+   * discretional knob; PR-CORRECTION-METER). All-zero when the log carries
+   * no corrections (honest "no corrections have been applied"). ③retroactive
+   * on this meter concerns corrections whose target predates the correction
+   * by > 1 day (see fold.ts RETROACTIVE_THRESHOLD_MS) — distinct from the
+   * pre-v21 `retroactive` field above (which detects retroactively-appended
+   * EVENTS, i.e. backdated ts on the append path). The two will be unified
+   * in a follow-up (HA B5 統合裁定・issue #6 next cycle).
+   */
+  correctionMeter: CorrectionMeterCounts;
 }
 
 // --- as-of prefix (TE03) ------------------------------------------------------
@@ -308,11 +326,20 @@ function buildRetroactiveWarning(
 
 export function buildReport(events: readonly Event[], opts: ReportOptions): ReportJson {
   const sorted = sortEvents(events);
+  // v21 §2.10: pass corrections through to derive() at each point-in-time cut.
+  // The correction meter surfaces on `now.correctionMeter`; consumers get an
+  // all-zero meter when opts.corrections is omitted or empty (backward compat).
+  const corrections = opts.corrections ?? [];
   const deriveAt = (day: IsoDate): DerivedState =>
     derive(prefixByDay(sorted, day), {
       asOf: day,
       ...(opts.capacityOf !== undefined ? { capacityOf: opts.capacityOf } : {}),
       ...(opts.startDate !== undefined ? { startDate: opts.startDate } : {}),
+      // The correction layer is timeless in structure — we pass it whole to
+      // every derive() call; latest-wins per targetEventId collapses it, and
+      // corrections targeting events not-yet-in-the-prefix simply have no
+      // effect at that cut (their target isn't in the effective stream).
+      corrections,
     });
 
   const now = deriveAt(opts.asOf);
@@ -417,6 +444,7 @@ export function buildReport(events: readonly Event[], opts: ReportOptions): Repo
     series,
     structuralErrors: now.structuralErrors,
     retroactive: buildRetroactiveWarning(events, opts.prev),
+    correctionMeter: now.correctionMeter,
   };
 }
 
@@ -473,6 +501,19 @@ export function formatReportText(
     lines.push(
       `  ⚠ 遡及記録 ${r.retroactive.count} 件（前回営業日以前の日付への追記あり — Δ は書き換わった過去との比較）`,
       `    対象: ${shown === '' ? '(不明)' : shown}${more} | 最古の遡及日付: ${tsDay(r.retroactive.oldestTs)}`,
+    );
+  }
+
+  // v21 §2.10 (d) correction meter — 4 permanent categories. Rendered only
+  // when a correction has actually landed (total > 0), keeping the empty log
+  // silent (§2.1 honesty). All 4 counts are shown together — no discretional
+  // "hide small categories" knob (PR-CORRECTION-METER; presentation may fold
+  // via omission-when-empty, but the counts themselves stay whole).
+  const cm = r.correctionMeter;
+  if (cm.total > 0) {
+    lines.push(
+      `  ⚠ 訂正記録 総数 ${cm.total} 件（§2.10・追記専用の第二層——Δ は訂正跨ぎで書き換わった過去との比較）`,
+      `    施錠対象 ${cm.locked} / 遡及 ${cm.retroactive} / 適用不能 ${cm.inapplicable}`,
     );
   }
 

@@ -63,6 +63,67 @@ describe('computeInbox — acceptance commit (issue #12)', () => {
   });
 });
 
+describe('R-U12-parent contested-containment warning (v21 §2.8 / issue #6)', () => {
+  // Two humans decompose the same child under DIFFERENT parents — the latest
+  // per-actor claims collide. §2.8: R-U12-isomorphic detection; the effective
+  // parent (containment) is latest-wins across ALL actors, but the WARNING
+  // fires because human actors disagree.
+  it('fires when distinct humans name different parents for the same child', () => {
+    const events: Event[] = [
+      { kind: 'decompose', id: 't1', ts: 1, actor: H('alice'), parent: 'ParentA', reason: 'r', children: [{ node: 'child' }] },
+      { kind: 'decompose', id: 't2', ts: 2, actor: H('bob'), parent: 'ParentB', reason: 'r', children: [{ node: 'child' }] },
+    ];
+    const items = computeInbox(derive(events, { asOf: ASOF }), fold(events));
+    const warn = items.find((i) => i.key === 'R-U12-parent:child');
+    expect(warn).toBeDefined();
+    expect(warn?.decisionType).toBe('warning');
+    expect(warn?.rid).toBe('R-U12-parent');
+  });
+
+  it('is silent when one human decomposes, or when both name the same parent', () => {
+    const single: Event[] = [
+      { kind: 'decompose', id: 't1', ts: 1, actor: H('alice'), parent: 'ParentA', reason: 'r', children: [{ node: 'child' }] },
+    ];
+    expect(
+      computeInbox(derive(single, { asOf: ASOF }), fold(single)).find((i) =>
+        i.key.startsWith('R-U12-parent:'),
+      ),
+    ).toBeUndefined();
+
+    const aligned: Event[] = [
+      { kind: 'decompose', id: 't1', ts: 1, actor: H('alice'), parent: 'ParentA', reason: 'r', children: [{ node: 'child' }] },
+      { kind: 'decompose', id: 't2', ts: 2, actor: H('bob'), parent: 'ParentA', reason: 'r', children: [{ node: 'child' }] },
+    ];
+    expect(
+      computeInbox(derive(aligned, { asOf: ASOF }), fold(aligned)).find((i) =>
+        i.key.startsWith('R-U12-parent:'),
+      ),
+    ).toBeUndefined();
+  });
+
+  it('clears when a human re-emits a decompose aligning the claim (§2.1)', () => {
+    const events: Event[] = [
+      { kind: 'decompose', id: 't1', ts: 1, actor: H('alice'), parent: 'ParentA', reason: 'r', children: [{ node: 'child' }] },
+      { kind: 'decompose', id: 't2', ts: 2, actor: H('bob'), parent: 'ParentB', reason: 'r', children: [{ node: 'child' }] },
+      // Alice concedes: she re-emits with the same parent as Bob.
+      { kind: 'decompose', id: 't3', ts: 3, actor: H('alice'), parent: 'ParentB', reason: 'align', children: [{ node: 'child' }] },
+    ];
+    const items = computeInbox(derive(events, { asOf: ASOF }), fold(events));
+    expect(items.find((i) => i.key === 'R-U12-parent:child')).toBeUndefined();
+  });
+
+  it('agent decomposes do not enter the warning register (human-only, R-U12 isomorphic)', () => {
+    const events: Event[] = [
+      { kind: 'decompose', id: 't1', ts: 1, actor: H('alice'), parent: 'ParentA', reason: 'r', children: [{ node: 'child' }] },
+      { kind: 'decompose', id: 't2', ts: 2, actor: A('ai'), parent: 'ParentB', reason: 'r', children: [{ node: 'child' }] },
+    ];
+    const items = computeInbox(derive(events, { asOf: ASOF }), fold(events));
+    // Alice's claim is still 'ParentA'; the agent's decompose changed the
+    // effective parent (latest-wins) but didn't add a distinct human claim.
+    expect(items.find((i) => i.key === 'R-U12-parent:child')).toBeUndefined();
+  });
+});
+
 describe('itemMatchesActor / assigneeOptions (issue #12)', () => {
   // leaf with assignee=alice (worker) and reviewer=bob (designated reviewer).
   const events: Event[] = [

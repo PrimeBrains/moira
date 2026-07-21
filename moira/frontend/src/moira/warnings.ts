@@ -53,6 +53,27 @@ export function computeInbox(derived: DerivedState, projected: ProjectedState): 
       });
     }
 
+    // v21 §2.8 contested-containment warning — R-U12-isomorphic on decompose.
+    // Detection: for the same child, distinct human actors' latest decompose
+    // namings point at DIFFERENT parents. Cleared when a human re-emits a
+    // decompose whose parent aligns the claims (§2.1 semantics). Not extended
+    // to assignee conflicts (§2.8 v21 honest asymmetry — containment moves
+    // the accounting structure; assignee is an attendant record).
+    const claimedParents = new Set(n.claimedParentByActor.values());
+    if (claimedParents.size > 1) {
+      items.push({
+        key: `R-U12-parent:${id}`,
+        rid: 'R-U12-parent',
+        kind: 'warning',
+        decisionType: 'warning',
+        title: `所属の矛盾主張: ${labelOf(id)}（${[...n.claimedParentByActor.entries()].map(([a, p]) => `${a}→${labelOf(p)}`).join(' / ')}）`,
+        node: id,
+        surface: 'spec-value',
+        actions: ['現行の親で decompose をやり直す（矛盾を解消する側の主張を追認）'],
+        clearWhen: '同じ親を指す decompose を追記すると消えます',
+      });
+    }
+
     // R-U13 unagreed completion
     if (completed && n.estimateState === 'proposed') {
       items.push({
