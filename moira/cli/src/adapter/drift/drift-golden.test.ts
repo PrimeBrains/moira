@@ -1,7 +1,7 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Actor } from 'moira-backend';
 import { agreeEvent, assignEvent, decomposeEvent, lifecycleEvent } from '../../emit.js';
 import { seqStamper } from '../../stamp.js';
@@ -15,7 +15,20 @@ const me: Actor = { kind: 'human', id: 'me' };
 const ai: Actor = { kind: 'agent', id: 'claude' };
 
 const tmp = mkdtempSync(join(tmpdir(), 'moira-drift-'));
-afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+// Isolate from ambient MOIRA_DIR (resolveMoiraHome env > cwd walk). cmdDrift
+// resolves the home via resolveMoiraHome, so an env-set MOIRA_DIR from the
+// developer shell would override the --dir arg's startDir and route the drift
+// check at a REAL log home.
+let savedMoiraDir: string | undefined;
+beforeAll(() => {
+  savedMoiraDir = process.env.MOIRA_DIR;
+  delete process.env.MOIRA_DIR;
+});
+afterAll(() => {
+  rmSync(tmp, { recursive: true, force: true });
+  if (savedMoiraDir === undefined) delete process.env.MOIRA_DIR;
+  else process.env.MOIRA_DIR = savedMoiraDir;
+});
 
 function seedKiro(): void {
   const dir = join(tmp, '.kiro', 'specs', 'task-add');
