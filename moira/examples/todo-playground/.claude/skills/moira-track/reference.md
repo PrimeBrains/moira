@@ -1,6 +1,6 @@
 # moira-track リファレンス（エンジン深掘り）
 
-> **managed file**: この文書は `moira adapter install` が設置する配布物（正本は sdd-workshop
+> **managed file**: この文書は `moira adapter install` が設置する配布物（正本は本リポ `PrimeBrains/moira` の
 > `moira/cli/templates/`）。手で編集すると次回 install で skip される（`moira adapter status` 参照）。
 
 `SKILL.md` から必要時に読む詳細集。運用の中核は `SKILL.md`。**本書はエンジン汎用**の
@@ -11,8 +11,8 @@ engine ソースに接地して収めた参照。**provider（方法論）固有
 Stage 2 新設＝機械可読設定の写し。**§P5 背骨弧は cc-sdd 版のみの拡張節** — custom provider の
 生成版には §P1〜§P4 だけがある）。
 
-> すべての行番号は sdd-workshop checkout の `moira/backend` `moira/cli` 参照実装に対する接地。**moira 本体は
-> 変更しない**（[ADR-0001](https://github.com/PrimeBrains/sdd-workshop/blob/main/.kiro/adr/0001-moira-cli-write-path.md)）。ここは「なぜその手順か」の根拠置き場。
+> すべての行番号は本リポ（`PrimeBrains/moira`）checkout の `moira/backend` `moira/cli` 参照実装に対する接地。**moira 本体は
+> 変更しない**（[ADR-0001](https://github.com/PrimeBrains/moira/blob/main/.kiro/adr/0001-moira-cli-write-path.md)）。ここは「なぜその手順か」の根拠置き場。
 
 ---
 
@@ -115,7 +115,7 @@ moira show
 
 ## §I engine-fact 接地表（主張 → 出典）
 
-| 主張 | 出典（sdd-workshop checkout） |
+| 主張 | 出典（本リポ `PrimeBrains/moira` checkout） |
 |---|---|
 | `--parent` 省略時: 既存ノードは現在親を再利用・新規のみ root（どちらも stderr に明示） | `moira/cli/src/tree.ts`（`resolveAddParent`）・`cmdAdd` |
 | `assign` は lifecycle を必ず `ready` へ | `moira/cli/src/emit.ts`（`to: opts.to ?? 'ready'`）／`cmdAssign` は `to` を渡さない |

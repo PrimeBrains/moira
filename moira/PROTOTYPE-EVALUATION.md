@@ -18,8 +18,8 @@
 | 1 | AI WBS 生成スペック群 | `generative-ai/docs/research/101-ai-wbs-generation/spec/`（SPEC.md＋WBS-* 11本＝12ファイル） | 仕様書（一部実装） |
 | 2 | evmtools | `generative-ai/.claude/skills/evmtools/` | 実装済み CLI スキル |
 | 3 | morning-report-full | `generative-ai/.claude/skills/morning-report-full/` | オーケストレータ スキル |
-| 4 | sdd-dashboard | `sdd-workshop/sdd-dashboard/` | 仕様レビュー UI 試作 |
-| 5 | evm-studio | `sdd-workshop/evm-studio/` | EVM ダッシュボード試作 |
+| 4 | sdd-dashboard | `sdd-workshop/sdd-dashboard/`（実体は旧リポ `PrimeBrains/sdd-workshop` 残留・本リポには移管せず〔来歴主義。[HISTORICAL-REFERENCES.md](./HISTORICAL-REFERENCES.md) の読み替え方針も参照〕） | 仕様レビュー UI 試作 |
+| 5 | evm-studio | `sdd-workshop/evm-studio/`（同上・実体は旧リポ残留） | EVM ダッシュボード試作 |
 
 > WBS 群の評価は共通スキーマ `WBS-COMMON.md` と全体仕様 `SPEC.md`/`WBS-ORCH.md` を主対象とし、残りのサブスペック（ELICIT/ESTIMATE/STAFFING/SCHEDULE/RESCHEDULE 等）は算法・ライフサイクルの裏付けに用いる。
 

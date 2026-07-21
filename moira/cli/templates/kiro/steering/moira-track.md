@@ -1,6 +1,6 @@
 # Moira トラッキング規約（cc-sdd → Moira アダプタ）
 
-> **managed file**: この文書は `moira adapter install` が設置する配布物（正本は sdd-workshop
+> **managed file**: この文書は `moira adapter install` が設置する配布物（正本は本リポ `PrimeBrains/moira` の
 > `moira/cli/templates/`）。手で編集すると次回 install で skip される（`moira adapter status` 参照）。
 
 このプロジェクトには cc-sdd → Moira アダプタがインストールされている。

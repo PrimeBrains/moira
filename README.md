@@ -32,4 +32,4 @@ git clone https://github.com/PrimeBrains/moira.git
 
 ## 来歴
 
-本リポジトリは 2026-07-20 に [PrimeBrains/sdd-workshop](https://github.com/PrimeBrains/sdd-workshop) から git filter-repo により履歴ごと分離されました（sdd-workshop#42）。詳細と issue 番号の読み替えは [`moira/changes/issue-42/migration-record.md`](./moira/changes/issue-42/migration-record.md) を参照。文書中に残る sdd-workshop 前提の記述（clone 手順等）は [#5](https://github.com/PrimeBrains/moira/issues/5) で改稿予定です。
+本リポジトリは 2026-07-20 に [PrimeBrains/sdd-workshop](https://github.com/PrimeBrains/sdd-workshop) から git filter-repo により履歴ごと分離されました（sdd-workshop#42）。詳細と issue 番号の読み替えは [`moira/changes/issue-42/migration-record.md`](./moira/changes/issue-42/migration-record.md) を参照。**移管前文書中の `#N` は `PrimeBrains/sdd-workshop#N` を指す**——読み替え方針の canonical は [`moira/HISTORICAL-REFERENCES.md`](./moira/HISTORICAL-REFERENCES.md)。

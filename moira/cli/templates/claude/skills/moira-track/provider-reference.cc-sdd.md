@@ -1,6 +1,6 @@
 # moira-track provider リファレンス — cc-sdd
 
-> **managed file**: この文書は `moira adapter install` が設置する配布物（正本は sdd-workshop
+> **managed file**: この文書は `moira adapter install` が設置する配布物（正本は本リポ `PrimeBrains/moira` の
 > `moira/cli/templates/` の `provider-reference.cc-sdd.md`・配布名は `provider-reference.md`）。
 > 手で編集すると次回 install で skip される（`moira adapter status` 参照）。
 
@@ -181,7 +181,7 @@ happy path は差し戻し無し）で示す。背骨弧との対応は §P5。
 
 ## §P5 背骨弧との対応（cc-sdd 版のみの拡張節）
 
-背骨フロー [`new-feature-happy-path`](https://github.com/PrimeBrains/sdd-workshop/blob/main/.kiro/scenarios/flows/new-feature-happy-path.md) は **弧の“形”**を定める正典。
+背骨フロー [`new-feature-happy-path`](https://github.com/PrimeBrains/moira/blob/main/.kiro/scenarios/flows/new-feature-happy-path.md) は **弧の“形”**を定める正典。
 playground はその形を**簡略な数値**で再現する（正確な値は人間が合意する見積で変わる）。
 
 | 背骨 # | 段 | moira-track フェーズ | 見える信号（形） | canon の例値 | playground の例値 |

@@ -14,7 +14,7 @@ kiro ライフサイクルを Moira に橋渡しする独自スキル [`moira-tr
 `moira` CLI をグローバルに入れます（レジストリ公開は不要）。
 
 ```bash
-# sdd-workshop の中で
+# 本リポ（PrimeBrains/moira）の中で
 cd moira/backend  && npm install && npm run build
 cd ../frontend    && npm install && npm run build
 cd ../cli         && npm install && npm run build && npm link   # → グローバル `moira`

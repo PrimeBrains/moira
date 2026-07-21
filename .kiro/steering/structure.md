@@ -12,7 +12,13 @@ Moira の確定ナレッジは `moira/` にある。**唯一の真実源は `moi
 | `moira/UI-ARCHITECTURE.md` ・ `moira/ui-mockups/` | 画面アーキ（被覆表・ラフ構成）とモックアップ |
 | `moira/DECISIONS.md` ・ `moira/thought-experiments/` | 意思決定ジャーナル / 思考実験 |
 | `moira/PROTOTYPE-EVALUATION.md` | 旧プロトタイプ 5 本の Moira 有用性評価 |
-| `moira/backend/` | S4 最小バックエンド（参照実装の縦スライス） |
+| `moira/HISTORICAL-REFERENCES.md` | 移管前文書の来歴参照メモ（旧 `#N` は sdd-workshop#N を指す等） |
+| `moira/backend/` | 参照実装（導出エンジン・純 TS 縦スライス） |
+| `moira/frontend/` | 参照実装（Vite + React + TS の read ダッシュボード。`backend/src/derive.ts` を直 import） |
+| `moira/cli/` | 参照実装（`moira` CLI・4イベント emit のスタンドアロンコマンド群。ADR-0001） |
+| `moira/examples/todo-playground/` | cc-sdd × Moira 体験用の実案件サンプル |
+| `moira/changes/` | 変更管理フロー（`moira-change`）の作業台帳（**非正典**・issue ごと・削除しない） |
+| `moira/plans/` | 過去 plan（設計来歴・非正典） |
 
 ## spec の命名と seeding
 
@@ -26,13 +32,13 @@ Moira の確定ナレッジは `moira/` にある。**唯一の真実源は `moi
 - **語彙の所有者は [moira-naming.md](moira-naming.md) 一つ**。他の steering は用語を再定義せず使う。
 - 引用は**章 ID（A2, P7, §2.1, R-S6 等）**で行い、バージョン番号は書かない（陳腐化回避）。
 
-## コード組織（`moira/backend` の実体）
+## コード組織（`moira/backend`・`moira/frontend`・`moira/cli` の実体）
 
 参照実装は MODEL の data → derivation → warn を層として写している。新コードもこの境界を保つ（具体ファイル名は列挙せず、層の責務だけを規約とする）:
 
-- **追記専用ログ層** — 4イベントのログ + c(i,d) の第二層。真実源（A2 / R-U14）。
-- **畳み込み層** — `(ts,id)` 決定的 fold（循環 relate 拒否・エージェント合意拒否）→ Projected 状態（I2 / I3 / R-U4）。
-- **導出層** — 純関数群（ノード状態／EV／カバレッジ／PV／AC／SPI・CPI／キュー／予測／有効集合）を 1 つのオーケストレータが R-S2 の導出群として組み立てる。
-- **read 層** — snapshot CLI・read-only HTTP。導出を出すだけで真実源・可変状態を持たない（層間に隠れたキャッシュを置かない）。
+- **追記専用ログ層** — 4イベントのログ + c(i,d) の第二層。真実源（A2 / R-U14）。`moira/backend/` および `moira/cli/`（`.moira/` 側のファイル永続）が実体。
+- **畳み込み層** — `(ts,id)` 決定的 fold（循環 relate 拒否・エージェント合意拒否）→ Projected 状態（I2 / I3 / R-U4）。`moira/backend/`。
+- **導出層** — 純関数群（ノード状態／EV／カバレッジ／PV／AC／SPI・CPI／キュー／予測／有効集合）を 1 つのオーケストレータが R-S2 の導出群として組み立てる。`moira/backend/`。
+- **read 層** — snapshot CLI（`moira/cli/`）・read-only HTTP（`moira/backend/`）・React ダッシュボード（`moira/frontend/`——`backend/src/derive.ts` を直接 import）。導出を出すだけで真実源・可変状態を持たない（層間に隠れたキャッシュを置かない）。
 
-永続化・UI など全体構成は未確定（[tech.md](tech.md)）。
+`moira/cli/` は書き込み経路（4イベントを emit するスタンドアロン CLI）を担う（[ADR-0001](../adr/0001-moira-cli-write-path.md)）。全体構成の詳細は [tech.md](tech.md)。
