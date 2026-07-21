@@ -512,7 +512,7 @@ export function planWbsEvents(
       if (completed) {
         if (estimateChanged) {
           warnings.push(
-            `行${r.rowIndex} (${r.id}): 完了済みノードの見積再合意はスキップしました（I4 done-lock — 訂正は supersede で扱う）`,
+            `行${r.rowIndex} (${r.id}): 完了済みノードの見積再合意はスキップしました（I4 done-lock — 意味的変更は supersede §2.7 で扱う。記録誤りの訂正は §2.10 の訂正記録で個別に発行してください）`,
           );
         }
         continue;
@@ -623,16 +623,18 @@ export function planWbsEvents(
   }
 
   // 6. cost (実績MD → AC) — completed rows book it on 実績終了日; in-progress rows
-  //    book the spent-so-far at import time (now). Existing-id rows: cost has
-  //    NO correction event (§7#19(a) — an accumulative, add-only fact); a node
-  //    that already carries recorded cost is skipped rather than double-booked
-  //    on every re-import (item 4's "don't re-emit actuals duplicately").
+  //    book the spent-so-far at import time (now). Existing-id rows: cost is
+  //    accumulative and add-only — a re-import must not double-book. A node
+  //    that already carries recorded cost is skipped rather than piled on;
+  //    recording-error repair goes via the §2.10 correction layer (v21),
+  //    NOT via a bulk re-import (which is why we skip here — the correction
+  //    is a targeted, reason-required, meter-visible fact).
   for (const r of rows) {
     if (r.actualCost === null || r.actualCost === 0) continue;
     const { existing } = diffOf(r);
     if (existing !== undefined && existing.ownCost !== 0) {
       warnings.push(
-        `行${r.rowIndex} (${r.id}): 既に実績コスト ${existing.ownCost}MD が記録済み — 重複計上を避けるため cost の再発行をスキップ（cost に訂正機構は無い — MODEL §7#19(a)）`,
+        `行${r.rowIndex} (${r.id}): 既に実績コスト ${existing.ownCost}MD が記録済み — 重複計上を避けるため cost の再発行をスキップ（記録誤りの訂正は MODEL §2.10 の訂正記録で個別に発行してください。負値による相殺は §1 A6 射程明確化で禁止）`,
       );
       continue;
     }

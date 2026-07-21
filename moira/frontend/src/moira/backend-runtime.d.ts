@@ -7,20 +7,33 @@
 // `moira-backend-resolver` plugin maps `@backend/*` → ../backend/src/*.ts.
 
 declare module '@backend/derive.js' {
-  import type { CapacityLookup, DerivedState, Event, IsoDate } from '@backend/types';
+  import type {
+    CapacityLookup,
+    Correction,
+    DerivedState,
+    Event,
+    IsoDate,
+  } from '@backend/types';
   export interface DeriveOptions {
     asOf: IsoDate;
     capacityOf?: CapacityLookup;
     startDate?: IsoDate;
+    /** v21 §2.10 correction layer (optional; omit for pre-v21 semantics). */
+    corrections?: readonly Correction[];
   }
   export function derive(events: readonly Event[], options: DeriveOptions): DerivedState;
 }
 
 declare module '@backend/fold.js' {
-  import type { Event, ProjectedState } from '@backend/types';
+  import type { Correction, Event, ProjectedState } from '@backend/types';
   // Per-node projected attributes (assignee/estimate/budget/parent) for DISPLAY.
   // Metrics still come only from derive(); this is the allowed projection.
-  export function fold(events: readonly Event[]): ProjectedState;
+  // v21 §2.10: fold accepts an OPTIONAL corrections array (second argument);
+  // when omitted, behavior is byte-identical to the pre-v21 fold.
+  export function fold(
+    events: readonly Event[],
+    corrections?: readonly Correction[],
+  ): ProjectedState;
 }
 
 declare module '@backend/derivations/landing.js' {

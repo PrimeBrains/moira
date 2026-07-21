@@ -38,6 +38,7 @@ function mkProjected(nodes: ProjectedNode[]): ProjectedState {
     seenCostIds: new Set(),
     structuralErrors: [],
     appliedAt: 0,
+    correctionMeter: { total: 0, locked: 0, retroactive: 0, inapplicable: 0 },
   };
 }
 
