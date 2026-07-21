@@ -62,7 +62,12 @@ sonnet worker（subagent）へ派遣してよいが、**クラス判定・ルー
 3. **triage**: フル工程を回すか、軽量ゆえフローを起動せず通常作業へ送り出すかを判定し、**判定理由を
    issue に一言コメント**する（誤判定の網は既存検知器が引き受ける）。**軽量判定なら台帳ディレクトリは
    作らず（request.md も作らない）、issue コメントの一言だけを記録としてここで終了**。
-4. **base commit を記録する**（`git rev-parse HEAD`。以後の全差分検査は `base..HEAD`）。
+4. **base commit を記録する**（`git rev-parse HEAD`。以後の全差分検査は `base..HEAD`）。**full-flow は
+   原則、issue 専用の git worktree を fresh な `origin/main` の分岐点から切り、その分岐点を base とする**
+   （`git fetch origin` → `git worktree add .claude/worktrees/issue-N -b worktree-issue-N origin/main`。以後
+   P2〜P5 はこの worktree 内で回す。軽量 exit は worktree 不要。worktree を用いない full-flow は受付時
+   commit を base）。**規範・目的・機構・限界・フォールバック・cleanup は steering §7「作業の隔離」**
+   （本手順は振り付けのみ・理由は複製しない）。
 5. `templates/request.template.md` から `moira/changes/issue-N/request.md` を起こす。
 
 ### 2. P2 影響調査
@@ -168,7 +173,11 @@ sonnet worker（subagent）へ派遣してよいが、**クラス判定・ルー
    出し、**AskUserQuestion は最終承認のみ**。人間が読む義務は 3 点だけ（fork の経緯は issue コメントに
    残るが読む義務なし）。
 2. 突合で「違う」と気づかれたら**その場で直さず** fork／新 issue として再入する（クローズは下りない）。
-3. 承認されたら: issue に閉包サマリ（できないこと差分含む）をコメントしてクローズ。ジャーナル来歴は
+3. 承認されたら: **full-flow の worktree はブランチを main へ直マージ**（ff 不能＝origin/main が進んだ場合は
+   rebase し、**rebase 後に P5 未マップ差分検査を新 base で再走**してから）**→ push**（PR は作らない）、
+   issue に閉包サマリ（できないこと差分含む）をコメントしてクローズ、**worktree を撤去**（`git worktree remove`；
+   未コミット差分が残ると失敗するため先にコミットするか `--force`。残存 worktree の再入時扱い・並行マージの
+   意味衝突開示は steering §7）。ジャーナル来歴は
    **該当する確定分岐がある場合のみ**（記録条件は `moira-model-update`／目録の既存規律に従う——本フローは
    条件を新設しない）。
 4. **撤回条件の運用**: 「事前批准した意図と agreed 文面の乖離が実害化」した欠陥は `/kiro-postmortem-add`

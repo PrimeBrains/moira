@@ -64,6 +64,13 @@ issue: {{ISSUE}}
 ## base commit
 
 <!-- 受付時点の commit。以後の全差分検査（P4 各ゲート完了時・P5 開始時）は `diff(base..HEAD)` に
-     統一する（steering §2 P1・P5、codex 指摘 R#13 反映）。 -->
+     統一する（steering §2 P1・P5、codex 指摘 R#13 反映）。
+     full-flow は issue 専用 worktree を fresh base（origin/main）から切り、その分岐点を base とする
+     （steering §7「作業の隔離」）——下の worktree 欄に記す。非 worktree・軽量時は受付時 commit のみ。 -->
 
 {{BASE_COMMIT}}
+
+<!-- full-flow の worktree 運用時のみ記入（非 worktree 時は「該当なし」）。 -->
+- worktree: {{WORKTREE_PATH}} <!-- 例: .claude/worktrees/issue-N（該当なし可） -->
+- branch / 分岐点: {{WORKTREE_BRANCH_AND_BASE}} <!-- 例: worktree-issue-N（origin/main <sha> から fresh 分岐） -->
+
