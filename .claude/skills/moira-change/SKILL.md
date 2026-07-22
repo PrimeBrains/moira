@@ -25,6 +25,15 @@ choreography of the **existing** gates in dependency order (no new gate is inven
 sync-closure check (three-valued verdict per impact-map row, plus a check that no un-mapped diff
 survives) → **P6** close, gated by a **thin final approval (H5)**.
 
+For **full-flow** issues, P1 by default creates a per-issue **git worktree** branched fresh from
+`origin/main` (after `git fetch`) so the flow (P2–P5) runs isolated from concurrent sessions sharing
+the checkout — the worktree's branch point becomes `base`, so the P5 `diff(base..HEAD)` is exactly
+this flow's work. P6 merges that branch to main (fast-forward, or rebase then re-run the P5
+unmapped-diff check), pushes, closes the issue, and removes the worktree; no PR. Full-flow may also
+run without a worktree (a fallback to the receipt-time base); lightweight-exit issues need no
+worktree. The normative procedure — including the honest limits, fallback, and cleanup — is
+`SKILL.ja.md` P1/P6 and the steering §7 "作業の隔離"; this English file is the convention shell only.
+
 The skill's own artifact is the **impact map** — an explicit, append-only ledger of downstream
 artifacts with, per row, the expected postcondition and the verifier that will confirm it. Closure
 is declared only once every row is either resolved-with-evidence or a properly tracked, still-open

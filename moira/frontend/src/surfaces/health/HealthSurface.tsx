@@ -75,6 +75,53 @@ export function HealthSurface() {
         </div>
       </Card>
 
+      {/* zone 3 — correction meter (v21 §2.10 (d)・PR-CORRECTION-METER・issue #6)
+          「常設 4 区分」— presentation may fold/mute, but count exclusion is
+          not permitted (裁量ノブなし). Rendered even when all zero — an all-zero
+          display is honest information ("no corrections have been applied"). */}
+      <Card>
+        <SectionTitle hint="第二層の追記専用訂正記録（§2.10）——数え方に裁量ノブを持たせない">
+          訂正計器
+        </SectionTitle>
+        <div style={{ display: 'flex', gap: 26, flexWrap: 'wrap' }}>
+          <SummaryStat
+            label="訂正総数"
+            value={d.correctionMeter.total.toFixed(0)}
+            tone="neutral"
+            testid="metric:correction-total"
+          />
+          <SummaryStat
+            label="施錠対象への訂正"
+            value={d.correctionMeter.locked.toFixed(0)}
+            tone={d.correctionMeter.locked > 0 ? 'warn' : 'neutral'}
+            sub="完了区域のノードを対象とする訂正（I4 v21「黙っては変わらない」）"
+            testid="metric:correction-locked"
+          />
+          <SummaryStat
+            label="遡及（訂正系）"
+            value={d.correctionMeter.retroactive.toFixed(0)}
+            tone={d.correctionMeter.retroactive > 0 ? 'warn' : 'neutral'}
+            sub="対象イベントの ts を過去へ動かす訂正・対象イベントより経過 24h 超後に発行された訂正"
+            testid="metric:correction-retro"
+          />
+          <SummaryStat
+            label="適用不能訂正"
+            value={d.correctionMeter.inapplicable.toFixed(0)}
+            tone={d.correctionMeter.inapplicable > 0 ? 'crit' : 'neutral'}
+            sub="対象イベントの型と噛み合わない・対象が存在しない等"
+            testid="metric:correction-inapplicable"
+          />
+        </div>
+        <div style={{ fontSize: 10.5, color: EVM.ink3, marginTop: 8 }}>
+          §2.10（普遍訂正原則）の第二層記録は追記専用・理由必須・元イベント id 名指し。
+          <b>4 区分は常設</b>で、UI で畳む/沈めるは可でも、特定の訂正を計数から除外するオプションは持たない
+          （PR-CORRECTION-METER）。①②③は単調計数（適用直前の読みでスタンプ）、④のみ現在状態述語。
+          ③遡及は訂正系（ts を過去へ動かす訂正・24h 超後着の訂正）のみを計数——③の追記系（過去日付への
+          イベント書き込み）は観測層の検知として CLI report が担う（本ゾーンには現れない）。
+          旧 issue #36 遡及書き込み警告は③に統合済み。
+        </div>
+      </Card>
+
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
         {/* SPI/CPI trend (blocked → single point) */}
         <Card style={{ flex: '1 1 320px' }}>

@@ -21,7 +21,7 @@ export {
   type MilestoneRollupOptions,
   type MilestoneRollupRow,
 } from './derivations/milestone-rollup.js';
-export { fold } from './fold.js';
+export { fold, materializeEffectiveEvents } from './fold.js';
 export { EventStore, sortEvents } from './event-store.js';
 export {
   CapacityStore,
@@ -64,6 +64,15 @@ export type {
   DecomposeEvent,
   RelateEvent,
   CostEvent,
+  // correction tier (v21/v22 §2.10) — pre-existing gap: report.ts (issue #6)
+  // already imports these; this barrel never re-exported them (TS2305, CI red
+  // on moira-cli build since issue #6). Purely additive wiring — no semantic
+  // change to fold.ts/types.ts.
+  Correction,
+  CorrectionNullify,
+  CorrectionPatch,
+  EventPatch,
+  CorrectionMeterCounts,
   // capacity tier
   CapacityEntry,
   CapacityLookup,

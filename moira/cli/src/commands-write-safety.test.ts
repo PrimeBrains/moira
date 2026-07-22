@@ -27,10 +27,16 @@ describe('write-layer safety (issue #37)', () => {
   const cwd0 = process.cwd();
   let tmp: string;
   let stderrBuf: string[];
+  let savedMoiraDir: string | undefined;
 
   beforeEach(async () => {
     tmp = mkdtempSync(join(tmpdir(), 'moira-safety-'));
     process.chdir(tmp);
+    // Isolate from the parent shell's MOIRA_DIR — resolveMoiraHome honors
+    // that env var above the cwd walk, so an ambient MOIRA_DIR from the
+    // developer's shell would route every runCli here at a REAL log home.
+    savedMoiraDir = process.env.MOIRA_DIR;
+    delete process.env.MOIRA_DIR;
     // realStamper() creates a FRESH stamper per CLI invocation (each `moira`
     // command is normally a separate OS process; only a single import call
     // shares one stamper — see wbs-import.ts). Driving several write commands
@@ -52,6 +58,8 @@ describe('write-layer safety (issue #37)', () => {
     process.chdir(cwd0);
     rmSync(tmp, { recursive: true, force: true });
     vi.restoreAllMocks();
+    if (savedMoiraDir === undefined) delete process.env.MOIRA_DIR;
+    else process.env.MOIRA_DIR = savedMoiraDir;
   });
 
   const stderrText = (): string => stderrBuf.join('');

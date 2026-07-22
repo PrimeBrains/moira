@@ -1,7 +1,7 @@
 # Testing Conventions
 
 テスト戦略の learning 集約ファイル。新しいテスト関連の Try が出たら、このファイルに H2 セクションで append する（1 トピック 1 ファイルではなく、テスト戦略カテゴリで束ねる）。
-（旧プロトタイプ由来の具体事例は postmortem リセットに伴い除去済み。汎用原則のみを残す。）
+（旧プロトタイプ由来の具体事例は postmortem リセットに伴い除去済み。**本ファイルは汎用原則を正典として保持し、Moira 固有の実例は各 Rule 内の脚注/例示で最小限に触れる**——固有詳細は `moira/backend/`・`moira/frontend/e2e/` の実テストと `.kiro/scenarios/` の agreed シナリオが所有する。）
 
 ---
 

@@ -25,6 +25,7 @@ function mkNode(partial: Partial<ProjectedNode> & { id: string }): ProjectedNode
     ownCost: 0,
     parent: null,
     agreedActorValues: new Map(),
+    claimedParentByActor: new Map(),
     ...partial,
   };
 }
@@ -38,6 +39,7 @@ function mkProjected(nodes: ProjectedNode[]): ProjectedState {
     seenCostIds: new Set(),
     structuralErrors: [],
     appliedAt: 0,
+    correctionMeter: { total: 0, locked: 0, retroactive: 0, inapplicable: 0 },
   };
 }
 

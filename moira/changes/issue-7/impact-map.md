@@ -7,35 +7,30 @@ issue: 7
 
 ## 波及先一覧
 
-<!-- append-only。行の削除禁止。P5 の閉包判定は行 ID 単位。 -->
-
 | 行 ID | 波及先成果物（パス） | クラス | 根拠 | 担当ゲート | 期待 postcondition | 検証器 | 状態 | 証跡 |
 |---|---|---|---|---|---|---|---|---|
-| R1 | .kiro/scenarios/units/schedule-rebaseline.md | S | agreed unit。§6 直後注記「完了済みの作業は再ベースラインを受け付けない（I4 施錠…）」・§7 決定事項「予算・スロットが施錠され引き直せない」が旧 I4 意味論（無条件不可）の断定。MODEL v21 I4（§2.9）「施錠と訂正の区別」と不整合（issue #2 影響マップ R11） | kiro-scenario（既存 unit 改稿ルート） | 断定 2 箇所が v21 の切り分け——意味的再ベースライン不可は不変・記録誤りの訂正は §2.10 で可能かつ施錠対象への訂正として計器に常設表示——に整合する文言へ改稿。§3 When/Then・§6 EARS は無傷。status: agreed を維持して再確定（agreed 改訂の理由は本台帳＋issue コメントに残る） | kiro-scenario ゲート（独立敵対者検証ループ＋独立採点者の意図整合検査） | resolved | ゲート R2 PASS（doc-gate-judge・意図整合 ALIGNED・agreed 維持の auto-agreed 確定。gate-round-records.md）＋確定 d660ee7＋会話ログ .kiro/conversations/2026-07-21-issue-7-i4-v21-scenario-sync.md |
-| R2 | .kiro/scenarios/units/schedule-rebaseline.md | S | 同一ファイル・別義務（事実参照の正確化）: §3 注記の `[MODEL.md:217]` 行番号アンカーが v21 の §2.10 挿入（約 40 行）で別内容（訂正計器）を指す事実ドリフト。§6 注記・§7 の「MODEL §3 I4」も I4 定義所在（§2.9 不変条件）と不一致 | kiro-scenario（同一改稿内） | MODEL 参照が v21 現行の実在箇所を指す（行番号アンカーは節参照など安定参照へ是正）。※スコープ追加は HA ② で裁定 | kiro-scenario ゲート内の事実照合（checker/fact-check 相当） | resolved | doc-fact-checker CONFIRMED（R-U7=§4.0・C6 撤回）＋ゲート R2 PASS＋d660ee7。※対象 unit 内の旧 spec 直リンク 4 箇所は追跡付き deferred（#8・採点者が要件充足を検証済み——閉包レポート参照） |
-| R3 | .kiro/scenarios/units/requirements-spec-returned.md | S | in-review unit。§1 脚注・§7 決定事項の「完了施錠（I4）・R-E3 …に抵触し敵対ゲートで却下」の前提記述が v21 精密化前の言い回し。却下の結論自体は v21 でも不変——後付け分割・按分は**意味的変更**であり I4 が拒む側（§2.10 の訂正では救済されない）（issue #2 影響マップ R12） | kiro-scenario（既存 unit 改稿ルート・in-review 状態内） | 前提記述が「I4 が拒むのは意味的変更（v21 精密化後も後付け分割・按分は却下不変）」として読める文言へ精密化。却下の結論・§3/§6 は無傷。status: in-review 維持（agreed への再批准は既存の再批准トラックの責務——本 issue はその前提文言を新正典に同期するのみ） | kiro-scenario ゲート（同上） | resolved | ゲート R2 PASS（Y1 修正の限定構文を MODEL と逐語照合・却下結論不変・in-review 維持＝批准 R3 どおり）＋d660ee7 |
-| R4 | moira/frontend/e2e/ | C | 波及なしの確認義務: requirements-spec-returned.meta.ts/.spec.ts は §6 EARS 13 節のみ参照（I4/§7 注記への参照なし）。schedule-rebaseline 対応 spec は不存在（未実装 write skill 前提）。coverage-check.test.ts の EARS カウントは §6 の WHEN/WHILE 行のみ | （ゲート起動なし——負の確認） | 本 issue で当該パス配下に差分が生じない（§3/§6 無傷ゆえ SPEC_META・EARS 節数とも不変）・coverage-check が green のまま | `git diff --name-only base..HEAD` の当該パス差分なし＋coverage-check.test.ts 実走 green | resolved | P5 検査（2026-07-21）: 8eb1b6f..9688a6a に moira/frontend/e2e/ 配下の差分なし＋`npm run e2e:coverage` 5 tests green |
-| R5 | .kiro/conversations/2026-07-21-issue-7-i4-v21-scenario-sync.md | S（ゲート付随成果物・P4 完了時検査での追記） | kiro-scenario 確定手順（手順 5）の義務的成果物——agreed unit 改稿理由の会話ログ（scenarios README「agreed 以降の変更は会話ログに理由を残す」）。HA ⑤ 承認済み実行計画（kiro-scenario 起動）に内包されるため新規の人間判断なし＝HB 不要 | kiro-scenario（確定手順） | spec-conversations 規約準拠（frontmatter: created_at/title/bindings/source＋要約/覆った判断/生ログ）の会話ログが存在し両 unit に bind される | 規約準拠の存在・様式確認（P5 照合） | resolved | d660ee7（規約項目全充足を著者確認・P5 で再照合） |
+| R1 | .kiro/scenarios/units/schedule-rebaseline.md | S | MODEL I4（§2.9）・§2.10 訂正層・§3 導出指標「再ベースライン／凍結属性と訂正」・issue #2 R11。§7 決定事項「完了サブ単位は再ベースライン不可（I4 施錠）」断定が v21 精密化で陳腐化（§3 When/Then・§6 EARS は無傷＝境界注記レベル） | kiro-scenario | §7 の「引き直せない」断定を v21 の切り分け（意味的再ベースラインは完了で施錠＝不可のまま／記録誤りの訂正は §2.10 で完了ノードにも届き「音が鳴る」）に整合する文言へ。When/Then・EARS 不変・status=agreed 維持 | kiro-scenario ゲート（doc-adversary＋doc-fact-checker＋doc-gate-judge）＋意図整合検査 | resolved | intent-ratification.md ④R1・gate-round-records.md・closure-report.md |
+| R2 | .kiro/scenarios/units/schedule-rebaseline.md | S | 変更管理 steering §2「MODEL 参照は安定 clause ID・行番号禁止」。v21 の §2.10 節挿入（約36行）で unit 内の MODEL 行番号アンカー（MODEL.md:217／:260／:232）が陳腐化（R1 と同一成果物・別義務ゆえ別行） | kiro-scenario | MODEL 行番号アンカーを安定な節/clause 参照（§3 導出指標・R-U7・I4・§2.10）へ置換。types.ts 側アンカー是正は参照実装同期 issue #6 の管轄と明記 | kiro-scenario ゲート＋リンク解決確認（MODEL 側 clause の実在確認） | resolved | gate-round-records.md・closure-report.md（リンク解決確認） |
+| R3 | .kiro/scenarios/units/requirements-spec-returned.md | S | MODEL I4（§2.9）・§2.10・issue #2 R12。§1/§7「後付け分割は I4 完了施錠・R-E3 に抵触し却下」の前提記述が v21 で陳腐化（却下の結論自体は不変） | kiro-scenario（前提文言同期のみ・in-review 維持・agreed 再批准は既存トラックに残す） | §1/§7 の前提文言を v21 I4 精密化へ整合（後付け分割は**意味的変更**であり記録誤りの訂正ではないため I4 は依然これを拒む＝却下不変）。§2/§4/§5/§6 は無変更・status=in-review 維持 | kiro-scenario ゲート＋意図整合検査 | resolved | intent-ratification.md ④R3・gate-round-records.md・closure-report.md |
+| R4 | moira/frontend/e2e/specs/requirements-spec-returned.spec.ts（＋ requirements-spec-returned.meta.ts） | S | 計器③（kiro-scenario-e2e）: unit の §2/§5 fixture・§6 EARS が SPEC_META 経由で E2E に写る。R1〜R3 の編集が §2/§5/§6 に触れないなら E2E 再生成は不要（schedule-rebaseline は E2E spec を持たない） | （E2E 波及なし——P5 で機械証跡化） | R1〜R3 の編集が §2/§5/§6（fixture・EARS）に一切触れないことを確認し、E2E 再生成不要を証跡化 | git diff で対象 unit の §2/§5/§6 無変更＋moira/frontend/e2e coverage-check green | resolved | closure-report.md（diff 範囲確認・CI） |
+
+<!-- append-only。再入があれば R5 以降を追記する。 -->
 
 ## 人間断面ビュー
 
-### レビュー対象（シナリオ・プロパティ・設計判断の 3 面のみ）
+### レビュー対象（シナリオ・プロパティ・設計判断の3面のみ）
 
 | 行 ID | 波及先 | 平易文（何が変わるか） | 状態 |
 |---|---|---|---|
-| R1 | 受け入れシナリオ（再ベースライン・確定済み） | 注記の「完了済みの作業は再ベースラインを受け付けない／引き直せない」という言い切りを、新ルールどおり「**計画や理解の変更としての引き直しは今もできない**。ただし**記録の誤り**（入力ミス等）の訂正は届く——直すと理由必須で計器に常時表示され、黙っては直せない」に改める。シナリオのふるまい本体（When/Then・受け入れ条件）は一切変えない | resolved |
-| R2 | 同シナリオの参照リンク | 正典モデルの版上げで行がずれ、注記のリンクが別の節を指してしまっている。正しい節を指すよう直す（ついで是正——HA で採用済み） | resolved（旧 spec 直リンクのみ #8 へ追跡） |
-| R3 | 受け入れシナリオ（差し戻し・レビュー中） | 「完了後に葉を割って出来高を按分する案は施錠に抵触し却下」という前提説明を、新ルールの言葉で正確にする。**却下という結論は変わらない**（按分は「考えの変更」であり、「記録の誤り」の訂正ではないため、新設の訂正ルールでも救済されない）。ふるまい本体は変えない。このシナリオは元々レビュー中の状態で、その再確定は本 issue の外（前提文言だけを新正典に揃える） | resolved |
-
-### 文書ゲート内で批准（HA 対象外）
-
-該当なし（F 級行なし）。
+| R1 | 受け入れシナリオ（再ベースライン） | 「完了した作業は再ベースラインできない（施錠）」という決定事項の言い回しを、正典 v21 の精密化に合わせる。**意味を変える再ベースライン（引き直し）は完了で施錠され不可、これは変わらない**。ただし v21 で「**記録の入力ミスの訂正**は完了した作業にも届き、その訂正は必ず理由付きで計器に常設表示される（＝黙っては変えられない）」ことが正典化されたので、決定事項の注記をその切り分けに整合させる。ふるまい本体（When/Then）と受入条件（EARS）は変えない | resolved |
+| R2 | 受け入れシナリオ（再ベースライン）の正典参照リンク | v21 で正典に新しい節（§2.10 訂正）が挿入され行番号がずれたため、unit 内の「正典の何行目」というリンクが指し先を外した。行番号ではなく**節・条項の名前**で参照する形に直す（内容は変えない・ずれの修理のみ） | resolved |
+| R3 | 受け入れシナリオ（差し戻し） | 「完了後に作業を後から分割して出来高を按分する案は、完了施錠（I4）に抵触するので却下」という前提記述の言い回しを v21 に合わせる。**却下という結論は変わらない**——後付け分割は「考えの変更（意味的変更）」であって「記録ミスの訂正」ではないため、v21 でも I4 はこれを拒む。この unit はレビュー中（in-review）のままで、正式合意（agreed）への再批准は既存の別トラックに残す | resolved |
 
 ### 人間はレビューしない（codex＋CI に委譲）
 
-以下は本フローの人間タッチポイント（HA・HB・H5）でのレビュー対象**ではない**——機械決着行であり、
-差分検査と CI に委譲する。
+R4（E2E 波及の有無確認）は機械決着行——ふるまい（§2/§5 fixture・§6 EARS）に触れないことを diff で
+確認し、E2E 再生成不要を CI（coverage-check）と併せ証跡化する。判断項目ではない。
 
 | 行 ID | 波及先 | クラス |
 |---|---|---|
-| R4 | moira/frontend/e2e/（変更なしの確認のみ） | C |
+| R4 | moira/frontend/e2e/specs/requirements-spec-returned.spec.ts（＋.meta.ts） | S（E2E 波及確認・機械決着） |

@@ -4,8 +4,22 @@
 // same deviation landing.test.ts documents.
 
 import { describe, expect, it } from 'vitest';
-import type { Actor, Event, IsoDate } from 'moira-backend';
+import type { Actor, Correction, Event, IsoDate } from 'moira-backend';
 import { buildReport, formatReportText, reportFilename } from './report.js';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Insert `e` at its chronologically-correct (by ts) position — keeps the raw
+ *  array physically sorted so the physical-order retroactive signal (report.ts
+ *  findRetroactiveEvents signal 2) never fires as a side effect of the splice,
+ *  isolating the id-decode signal (signal 1) under test. */
+function insertChronologically(events: readonly Event[], e: Event): Event[] {
+  const arr = [...events];
+  const idx = arr.findIndex((x) => x.ts > e.ts);
+  if (idx === -1) arr.push(e);
+  else arr.splice(idx, 0, e);
+  return arr;
+}
 
 const h1: Actor = { kind: 'human', id: 'h1' };
 const ai: Actor = { kind: 'agent', id: 'ai' };
@@ -160,6 +174,7 @@ describe('buildReport', () => {
     expect(empty.landing.daysLate).toBeNull();
     expect(empty.structuralErrors).toEqual([]);
     expect(empty.retroactive).toBeNull();
+    expect(empty.orderAnomaly).toBeNull();
   });
 
   it('milestones default to [] when opts.milestones is omitted (existing calls stay unaffected)', () => {
@@ -168,16 +183,161 @@ describe('buildReport', () => {
 
   it('a clean append-only log with no reversal → retroactive is null (honest silence)', () => {
     expect(r.retroactive).toBeNull();
+    expect(r.orderAnomaly).toBeNull();
   });
 });
 
-describe('buildReport retroactive-append detection (issue #36)', () => {
+describe('buildReport correction as-of cut (issue #11 #3 — corrections are cut at (ts,id) ≤ T just like events)', () => {
+  it('a correction issued AFTER asOf has no effect at all (asOf precedes the correction ts)', () => {
+    const events = weekLog();
+    const costA = events.find((e) => e.kind === 'cost' && e.node === 'a')!;
+    const corrections: Correction[] = [
+      {
+        id: 'c1',
+        ts: Date.parse('2026-07-10T12:00:00.000Z'), // issued AFTER OPTS.asOf (07-06)
+        actor: h1,
+        targetEventId: costA.id,
+        reason: '実績の入力ミス — 2MDではなく0.5MDが正しい',
+        correctionKind: 'patch',
+        patch: { amount: 0.5 },
+      },
+    ];
+    const corrected = buildReport(events, { ...OPTS, corrections });
+    const baseline = buildReport(events, OPTS);
+    expect(corrected.now.ac).toBe(baseline.now.ac); // asOf (07-06) < correction ts's day (07-10)
+    expect(corrected.prevMetrics.ac).toBe(baseline.prevMetrics.ac);
+    expect(corrected.series.map((m) => m.ac)).toEqual(baseline.series.map((m) => m.ac));
+    expect(corrected.correctionMeter.total).toBe(0); // not yet in effect at the asOf cut either
+  });
+
+  it('a correction issued 7/10 does not rewrite the 7/3 prev/series points, but DOES apply once the cut reaches/passes 7/10', () => {
+    const events = weekLog();
+    const costA = events.find((e) => e.kind === 'cost' && e.node === 'a')!; // cost(a)=2 on 07-02
+    const corrections: Correction[] = [
+      {
+        id: 'c1',
+        ts: Date.parse('2026-07-10T12:00:00.000Z'),
+        actor: h1,
+        targetEventId: costA.id,
+        reason: '実績の入力ミス — 2MDではなく0.5MDが正しい',
+        correctionKind: 'patch',
+        patch: { amount: 0.5 },
+      },
+    ];
+    const r = buildReport(events, {
+      ...OPTS,
+      asOf: '2026-07-11' as IsoDate, // on/after the correction's day (07-10)
+      prev: '2026-07-03' as IsoDate, // strictly before the correction's day
+      seriesDays: ['2026-07-03', '2026-07-11'] as IsoDate[],
+      corrections,
+    });
+    // now (asOf=07-11 ≥ 07-10): corrected — 0.5 (a) + 4 (c) = 4.5
+    expect(r.now.ac).toBe(4.5);
+    expect(r.correctionMeter.total).toBe(1);
+    // prev (07-03 < 07-10): the correction did not exist yet at that cut —
+    // uncorrected cost(a)=2 still applies (non-causal read would be a bug).
+    expect(r.prevMetrics.ac).toBe(2);
+    // series: the 07-03 point stays uncorrected; the 07-11 point is corrected.
+    expect(r.series.map((m) => m.date)).toEqual(['2026-07-03', '2026-07-11']);
+    expect(r.series[0]!.ac).toBe(2);
+    expect(r.series[1]!.ac).toBe(4.5);
+  });
+});
+
+describe('buildReport corrections reach feature/milestone/landing (issue #11 gate-2 R2 #1 — the former #4 known-limitation)', () => {
+  it('a frozenBudget correction on a completed leaf\'s agree event is reflected in the feature breakdown\'s evAbs', () => {
+    const events = weekLog();
+    // c (f2's only leaf) is implemented at asOf=07-06 — completed & agreed,
+    // so its frozenBudget feeds evAbs (ev.ts computeEvAbs). The original
+    // record recorded 5MD; correcting it to 9MD must move f2's evAbs, since
+    // MODEL §2.10's one-line principle says the feature breakdown reads the
+    // SAME corrected log the headline pair-read already does.
+    const agreeC = events.find((e) => e.kind === 'transition' && e.node === 'c' && e.to === 'agreed')!;
+    const corrections: Correction[] = [
+      {
+        id: 'c1',
+        ts: Date.parse('2026-07-05T12:00:00.000Z'),
+        actor: h1,
+        targetEventId: agreeC.id,
+        reason: '合意額の記録誤り — 5MDではなく9MDが正しい',
+        correctionKind: 'patch',
+        patch: { frozenBudget: 9 },
+      },
+    ];
+    const baseline = buildReport(events, OPTS);
+    const corrected = buildReport(events, { ...OPTS, corrections });
+    const baseF2 = baseline.features.find((f) => f.feature === 'f2')!;
+    const corrF2 = corrected.features.find((f) => f.feature === 'f2')!;
+    expect(baseF2.evAbs).toBe(5); // uncorrected baseline, sanity check
+    expect(corrF2.evAbs).toBe(9); // corrected — was silently 5 before this fix
+    expect(corrected.correctionMeter.total).toBe(1);
+  });
+
+  it('a cost amount correction is reflected in the milestone rollup\'s AC/CPI (AC is not exposed on the feature breakdown at all)', () => {
+    const events = weekLog();
+    const costC = events.find((e) => e.kind === 'cost' && e.node === 'c')!; // cost(c)=4 on 07-06
+    const corrections: Correction[] = [
+      {
+        id: 'c1',
+        ts: Date.parse('2026-07-06T14:00:00.000Z'),
+        actor: h1,
+        targetEventId: costC.id,
+        reason: '実績の入力ミス — 4MDではなく10MDが正しい',
+        correctionKind: 'patch',
+        patch: { amount: 10 },
+      },
+    ];
+    const baseline = buildReport(events, OPTS_WITH_MILESTONES);
+    const corrected = buildReport(events, { ...OPTS_WITH_MILESTONES, corrections });
+    const baseM2 = baseline.milestones.find((m) => m.milestone === 'M2')!;
+    const corrM2 = corrected.milestones.find((m) => m.milestone === 'M2')!;
+    expect(baseM2.ac).toBe(4); // uncorrected baseline, sanity check
+    expect(baseM2.cpi).toBeCloseTo(5 / 4, 6);
+    expect(corrM2.ac).toBe(10); // corrected — was silently 4 before this fix
+    expect(corrM2.cpi).toBeCloseTo(5 / 10, 6);
+  });
+
+  it('an estimate correction on the only incomplete leaf pushes the landing forecast later', () => {
+    const events = weekLog();
+    // b (3MD, incomplete) is the sole driver of D_pred in weekLog (see the
+    // top-level 'landing is the canonical D_pred' test). Correcting its
+    // estimate to 20MD lengthens the leveler's nominal duration for b
+    // (leveler.ts nominalDurationDays reads latestEstimate), which must push
+    // the forecast later — proving computeLandingCurve now also sees the
+    // corrected log, not the raw one. (A smaller bump, e.g. 8MD, is NOT
+    // reliably later: the leveler's critical-path priority reorders the fill
+    // by longest-downstream-duration, so a bigger b can jump the queue ahead
+    // of a/c and land on the same calendar date by coincidence — 20MD is
+    // large enough to dominate regardless of fill order.)
+    const decomposeF1 = events.find((e) => e.kind === 'decompose' && e.parent === 'f1')!;
+    const corrections: Correction[] = [
+      {
+        id: 'c1',
+        ts: Date.parse('2026-07-04T12:00:00.000Z'),
+        actor: h1,
+        targetEventId: decomposeF1.id,
+        reason: '見積の記録誤り — bは3MDではなく20MDが正しい',
+        correctionKind: 'patch',
+        patch: { children: [{ node: 'a', estimate: 2 }, { node: 'b', estimate: 20 }] },
+      },
+    ];
+    const baseline = buildReport(events, OPTS);
+    const corrected = buildReport(events, { ...OPTS, corrections });
+    expect(baseline.landing.landingDate).toBe('2026-07-08'); // sanity check (top-level test)
+    expect(corrected.landing.landingDate).not.toBeNull();
+    // ISO 'YYYY-MM-DD' strings sort lexically with date order.
+    expect(corrected.landing.landingDate! > baseline.landing.landingDate!).toBe(true);
+    expect(corrected.correctionMeter.total).toBe(1);
+  });
+});
+
+describe('buildReport retroactive-append detection (③c — v22 §2.10 (d); issue #36 origin, boundary unified in issue #11)', () => {
   // events.json's on-disk order is always fully re-sorted by (ts,id) on save
   // (backend EventStore.saveJson), so the ONLY way a real `moira` write path
   // can still show up as "physically out of order" by the time report reads
   // it is via a hand-edited events.json — hence this test constructs the RAW
   // array directly, out of (ts,id) order, exactly as such a hand edit would.
-  it('an event appended AFTER the log with a ts predating a business day already reported (prev) → warning with count + node', () => {
+  it('a physical-order-only anomaly (no realStamper-shaped id, so no confirmed >24h) → orderAnomaly warning, NOT ③c (issue #11 #6)', () => {
     const events = weekLog();
     events.push({
       kind: 'cost',
@@ -188,38 +348,51 @@ describe('buildReport retroactive-append detection (issue #36)', () => {
       amount: 1,
     });
     const r = buildReport(events, OPTS); // OPTS.prev = '2026-07-03'
-    expect(r.retroactive).not.toBeNull();
-    expect(r.retroactive!.count).toBe(1);
-    expect(r.retroactive!.nodes).toEqual(['a']);
-    expect(r.retroactive!.oldestTs).toBe(Date.parse('2026-07-01T12:00:00.000Z'));
-    expect(r.retroactive!.moreNodesCount).toBe(0);
+    // No realStamper-shaped id here — the id-decode signal never fires, so
+    // this can only ever be a physical-order anomaly, never a confirmed ③c
+    // (issue #11 #6: physical disorder alone cannot prove >24h elapsed).
+    expect(r.retroactive).toBeNull();
+    expect(r.orderAnomaly).not.toBeNull();
+    expect(r.orderAnomaly!.count).toBe(1);
+    expect(r.orderAnomaly!.nodes).toEqual(['a']);
+    expect(r.orderAnomaly!.oldestTs).toBe(Date.parse('2026-07-01T12:00:00.000Z'));
+    expect(r.orderAnomaly!.moreNodesCount).toBe(0);
   });
 
-  it('an out-of-order append whose ts is NEWER than prev → no warning (nothing in the already-reported window changed)', () => {
+  it('an out-of-order append (no realStamper-shaped id) never confirms ③c — but the arrival-order anomaly is still flagged as a STANDING signal (issue #11 #5/#6)', () => {
     const events = weekLog();
     events.push({
       kind: 'cost',
       id: 'e000', // sorts before everything already appended — still a physical reversal...
-      ts: Date.parse('2026-07-06T08:00:00.000Z'), // ...but its ts (07-06) is after prev (07-03)
+      ts: Date.parse('2026-07-06T08:00:00.000Z'), // ...ts (07-06) happens to be after prev (07-03)
       actor: h1,
       node: 'c',
       amount: 1,
     });
     const r = buildReport(events, OPTS);
-    expect(r.retroactive).toBeNull();
+    expect(r.retroactive).toBeNull(); // no id-decode signal — ③c is never confirmed
+    // ③ is a 常設区分 (MODEL v22 §2.10 (d)) — the detected order anomaly is
+    // disclosed regardless of whether its ts happens to fall before/after
+    // `prev` (issue #11 #5's standing-count principle applies uniformly).
+    expect(r.orderAnomaly).not.toBeNull();
+    expect(r.orderAnomaly!.count).toBe(1);
+    expect(r.orderAnomaly!.nodes).toEqual(['c']);
   });
 
-  it('an id-decoded retroactive record appended BEFORE prev (already reported) → no warning (no permanent false alarm, issue #37-review item 1)', () => {
-    // realStamper-shaped id: appended 07-01, but its ts is backdated onto
-    // 06-30 (before the append day) — a genuine retroactive record by the
-    // id-decode signal. Crucially, the APPEND itself (07-01) is on or before
-    // `prev` (07-03): a report already run on/after 07-01 would already have
-    // folded this record's effect into its Δ, so warning about it again on
-    // every subsequent report (as the pre-fix code did, since it only
-    // compared appendTs > e.ts and never checked appendTs against prev)
-    // would be a stale, permanent false alarm.
-    const appendTs = Date.parse('2026-07-01T12:00:00.000Z');
-    const claimedTs = Date.parse('2026-06-30T12:00:00.000Z');
+  it('an id-decoded retroactive record remains counted even once its append itself is long past — ③c is a STANDING count (issue #11 #5; supersedes the old aging-out behavior of issue #37-review item 1)', () => {
+    // realStamper-shaped id: appended 06-30, but its ts is backdated onto
+    // 06-28 — a delta of 48h, comfortably past the v22 strict->24h boundary
+    // (issue #11), so this is a genuine retroactive record by the id-decode
+    // signal REGARDLESS of the threshold change (keeping this test meaningful
+    // post-v22 — a delta of exactly ~24h here would make idRetroactive false
+    // and vacuously pass this test for the wrong reason). The APPEND itself
+    // (06-30) is on or before `prev` (07-03) — under the pre-#5 design this
+    // record would have "aged out" of the warning once `prev` caught up to
+    // it (a permanent false-alarm concern from issue #37-review item 1). v22
+    // §2.10 (d) settles it the other way: ③ is a 常設区分 (standing category)
+    // — a detected record never ages out, it just keeps being counted.
+    const appendTs = Date.parse('2026-06-30T12:00:00.000Z');
+    const claimedTs = Date.parse('2026-06-28T12:00:00.000Z');
     const anchored: Event = {
       kind: 'cost',
       id: `${appendTs.toString(36)}-000001-abcd`,
@@ -229,18 +402,22 @@ describe('buildReport retroactive-append detection (issue #36)', () => {
       amount: 1,
     };
     const events = [anchored, ...weekLog()];
-    const r = buildReport(events, OPTS); // OPTS.prev = '2026-07-03', after the 07-01 append
-    expect(r.retroactive).toBeNull();
+    const r = buildReport(events, OPTS); // OPTS.prev = '2026-07-03', long after the 06-30 append
+    expect(r.retroactive).not.toBeNull();
+    expect(r.retroactive!.count).toBe(1);
+    expect(r.retroactive!.nodes).toEqual(['a']);
+    expect(r.retroactive!.oldestTs).toBe(claimedTs);
   });
 
-  it('a realStamper-shaped id moved PHYSICALLY out of order (no backdating) is STILL caught, via the independent physical-order signal (issue #37-review item 2)', () => {
+  it('a realStamper-shaped id moved PHYSICALLY out of order (no backdating) is STILL caught, via the independent physical-order signal — but as orderAnomaly, since id-decode alone confirms nothing (issue #37-review item 2; recategorized under issue #11 #6)', () => {
     // The id's embedded instant matches its own ts exactly (no backdating —
     // the id-decode signal alone would find nothing retroactive here), but
     // the event is spliced in physically BEHIND already-newer events, i.e.
     // exactly what a hand edit that moved an existing (legitimately-id'd) row
-    // further down the file would produce. Before the fix, realStamper-shaped
-    // ids were judged EXCLUSIVELY by the id signal, so this case slipped
-    // through undetected; the two signals must be evaluated independently.
+    // further down the file would produce. The two signals are evaluated
+    // independently; here only the physical-order signal fires, so this is
+    // an orderAnomaly (NOT ③c — issue #11 #6 keeps this bucket separate since
+    // the >24h boundary is never confirmed by order alone).
     const ts = Date.parse('2026-07-01T09:00:00.000Z');
     const moved: Event = {
       kind: 'cost',
@@ -252,9 +429,10 @@ describe('buildReport retroactive-append detection (issue #36)', () => {
     };
     const events = [...weekLog(), moved]; // physically LAST, chronologically EARLIEST
     const r = buildReport(events, OPTS); // OPTS.prev = '2026-07-03'
-    expect(r.retroactive).not.toBeNull();
-    expect(r.retroactive!.count).toBe(1);
-    expect(r.retroactive!.nodes).toEqual(['a']);
+    expect(r.retroactive).toBeNull();
+    expect(r.orderAnomaly).not.toBeNull();
+    expect(r.orderAnomaly!.count).toBe(1);
+    expect(r.orderAnomaly!.nodes).toEqual(['a']);
   });
 
   it('a ts-anchored event (WBS import style, issue #24) is caught by id-decode alone, even in chronologically-correct physical position', () => {
@@ -281,6 +459,43 @@ describe('buildReport retroactive-append detection (issue #36)', () => {
     expect(r.retroactive).not.toBeNull();
     expect(r.retroactive!.nodes).toContain('b');
     expect(r.retroactive!.oldestTs).toBe(claimedTs);
+  });
+
+  // v22 §2.10 (d) ③c fixed boundary (issue #11): "経過 24 時間超" — strictly
+  // more than 24 elapsed hours, exactly 24h does NOT count. Pre-v22 the
+  // id-decode signal fired on ANY positive delay; both cases below are placed
+  // chronologically (insertChronologically) so the physical-order signal never
+  // fires as a side effect, isolating the id-decode signal under test.
+  it('id-decode delay of EXACTLY 24h is NOT retroactive (strict boundary; ちょうど24hは含まない)', () => {
+    const claimedTs = Date.parse('2026-07-03T13:00:00.000Z'); // day 07-03, on/before prev
+    const appendTs = claimedTs + DAY_MS; // exactly 24h later — day 07-04, > prev
+    const anchored: Event = {
+      kind: 'cost',
+      id: `${appendTs.toString(36)}-000001-abcd`,
+      ts: claimedTs,
+      actor: h1,
+      node: 'b',
+      amount: 1,
+    };
+    const r = buildReport(insertChronologically(weekLog(), anchored), OPTS);
+    expect(r.retroactive).toBeNull();
+  });
+
+  it('id-decode delay of 24h + 1ms IS retroactive (just past the strict boundary)', () => {
+    const claimedTs = Date.parse('2026-07-03T13:00:00.000Z'); // day 07-03, on/before prev
+    const appendTs = claimedTs + DAY_MS + 1; // 24h + 1ms later — day 07-04, > prev
+    const anchored: Event = {
+      kind: 'cost',
+      id: `${appendTs.toString(36)}-000001-abcd`,
+      ts: claimedTs,
+      actor: h1,
+      node: 'b',
+      amount: 1,
+    };
+    const r = buildReport(insertChronologically(weekLog(), anchored), OPTS);
+    expect(r.retroactive).not.toBeNull();
+    expect(r.retroactive!.count).toBe(1);
+    expect(r.retroactive!.nodes).toEqual(['b']);
   });
 });
 
@@ -379,13 +594,19 @@ describe('formatReportText', () => {
   });
 });
 
-describe('formatReportText retroactive-append warning (issue #36)', () => {
-  it('renders the ⚠ 遡及記録 line right after the 前回比 Δ section, with count/node label/oldest date', () => {
+describe('formatReportText unified ③ alert surface (v22 §2.10 (d); issue #11 R8 — supersedes the pre-v22 two-block issue #36 display)', () => {
+  it('renders the ⚠ 訂正・遡及 block right after the 前回比 Δ section, with the 遡及書き込み line carrying count/node label/oldest date', () => {
     const events = weekLog();
+    // realStamper-shaped id, appended 9 days after its claimed ts — a
+    // CONFIRMED ③c record (id-decode signal; issue #11 #6 keeps this
+    // distinct from a bare physical-order anomaly, which renders as a
+    // separate 到着順の乱れ line — see the next test).
+    const claimedTs = Date.parse('2026-07-01T12:00:00.000Z');
+    const appendTs = Date.parse('2026-07-10T09:00:00.000Z');
     events.push({
       kind: 'cost',
-      id: 'e999',
-      ts: Date.parse('2026-07-01T12:00:00.000Z'),
+      id: `${appendTs.toString(36)}-000001-abcd`,
+      ts: claimedTs,
       actor: h1,
       node: 'a',
       amount: 1,
@@ -394,12 +615,116 @@ describe('formatReportText retroactive-append warning (issue #36)', () => {
     const text = formatReportText(r, (id) => (id === 'a' ? 'タスクA' : id), 'demo');
     const lines = text.split('\n');
     const deltaHeaderIdx = lines.findIndex((l) => l.startsWith('## 前回比 Δ'));
-    const warnIdx = lines.findIndex((l) => l.includes('⚠ 遡及記録'));
+    const warnIdx = lines.findIndex((l) => l.includes('⚠ 訂正・遡及'));
     expect(warnIdx).toBeGreaterThan(deltaHeaderIdx);
-    expect(lines[warnIdx]).toContain('⚠ 遡及記録 1 件');
-    expect(lines[warnIdx]).toContain('前回営業日以前の日付への追記あり');
-    expect(lines[warnIdx + 1]).toContain('タスクA (a)');
-    expect(lines[warnIdx + 1]).toContain('最古の遡及日付: 2026-07-01');
+    // Only the WRITE system (③c) fired here — no corrections supplied — so the
+    // 訂正記録 line (correction system) must be absent (系ごとの計数を共表示・
+    // どちらか一方だけ非ゼロでもブロックは出る、が非該当の系まで捏造しない).
+    expect(text).not.toContain('訂正記録 総数');
+    expect(lines[warnIdx + 1]).toContain('遡及書き込み 1 件');
+    expect(lines[warnIdx + 2]).toContain('タスクA (a)');
+    expect(lines[warnIdx + 2]).toContain('最古の遡及日付: 2026-07-01');
+    expect(text).not.toContain('到着順の乱れ');
+  });
+
+  it('renders the 到着順の乱れ line (NOT 遡及書き込み) when only the physical-order signal fires — no confirmed >24h boundary (issue #11 #6)', () => {
+    const events = weekLog();
+    events.push({
+      kind: 'cost',
+      id: 'e999', // not realStamper-shaped — id-decode signal never fires
+      ts: Date.parse('2026-07-01T12:00:00.000Z'),
+      actor: h1,
+      node: 'a',
+      amount: 1,
+    });
+    const r = buildReport(events, OPTS);
+    const text = formatReportText(r, (id) => (id === 'a' ? 'タスクA' : id), 'demo');
+    const lines = text.split('\n');
+    expect(text).toContain('⚠ 訂正・遡及');
+    // The header sentence itself mentions "遡及書き込み" (it names both
+    // systems), so assert on the actual BULLET LINE, not a bare substring.
+    expect(lines.some((l) => l.trim().startsWith('遡及書き込み'))).toBe(false);
+    expect(lines.some((l) => l.trim().startsWith('到着順の乱れ 1 件'))).toBe(true);
+    expect(text).toContain('タスクA (a)');
+    expect(text).toContain('24時間超は未確証');
+  });
+
+  it('renders the 訂正記録 line with real counts when corrections are supplied — no 遡及書き込み line when no write-side retroactive record exists', () => {
+    const events = weekLog();
+    const target = events.find((e) => e.kind === 'cost')!;
+    const corrections: Correction[] = [
+      {
+        id: 'corr-001',
+        ts: Date.parse('2026-07-06T15:00:00.000Z'),
+        actor: h1,
+        targetEventId: target.id,
+        reason: '実績の入力ミス — 2MD ではなく 3MD が正しい',
+        correctionKind: 'patch',
+        patch: { amount: 3 },
+      },
+    ];
+    const r = buildReport(events, { ...OPTS, corrections });
+    expect(r.correctionMeter.total).toBe(1);
+    const text = formatReportText(r, (id) => id, 'demo');
+    expect(text).toContain('⚠ 訂正・遡及');
+    expect(text).toContain(
+      `訂正記録 総数 1 件（施錠対象 ${r.correctionMeter.locked} / 遡及 ${r.correctionMeter.retroactive} / 適用不能 ${r.correctionMeter.inapplicable}）`,
+    );
+    // The header's explanatory clause mentions "遡及書き込み" by name (it names
+    // both systems), so assert on the actual BULLET LINE — the write-side
+    // system's dedicated row — rather than a bare substring match.
+    const lines = text.split('\n');
+    expect(lines.some((l) => l.trim().startsWith('遡及書き込み'))).toBe(false);
+  });
+
+  it('both systems firing simultaneously render under ONE ⚠ 訂正・遡及 header — no duplicate header, both breakdown lines present (the defining scenario of the v22 unification — 二重表示を廃す)', () => {
+    const events = weekLog();
+    const correctionTarget = events.find((e) => e.kind === 'cost')!; // a cost event on 'a'
+    const corrections: Correction[] = [
+      {
+        id: 'corr-both',
+        ts: Date.parse('2026-07-06T15:00:00.000Z'),
+        actor: h1,
+        targetEventId: correctionTarget.id,
+        reason: '実績の入力ミス — 2MD ではなく 3MD が正しい',
+        correctionKind: 'patch',
+        patch: { amount: 3 },
+      },
+    ];
+    // An independent ③c retroactive-WRITE record on a DIFFERENT node ('b'),
+    // just past the strict 24h boundary — a separate population from the
+    // correction above (different target/mechanism entirely).
+    const claimedTs = Date.parse('2026-07-03T13:00:00.000Z');
+    const appendTs = claimedTs + DAY_MS + 1;
+    const anchored: Event = {
+      kind: 'cost',
+      id: `${appendTs.toString(36)}-000001-abcd`,
+      ts: claimedTs,
+      actor: h1,
+      node: 'b',
+      amount: 1,
+    };
+    const withRetroWrite = insertChronologically(events, anchored);
+    const r = buildReport(withRetroWrite, { ...OPTS, corrections });
+    expect(r.correctionMeter.total).toBe(1);
+    expect(r.retroactive).not.toBeNull();
+
+    const text = formatReportText(r, (id) => id, 'demo');
+    const lines = text.split('\n');
+    const headerLines = lines.filter((l) => /⚠ 訂正・遡及/.test(l));
+    expect(headerLines).toHaveLength(1); // exactly ONE alert surface — not two ⚠ blocks
+    expect(text).toContain('訂正記録 総数 1 件');
+    expect(lines.some((l) => l.trim().startsWith('遡及書き込み 1 件'))).toBe(true);
+  });
+
+  it('omits the entire block when neither system has anything to report (honest silence; both zero → no block)', () => {
+    const r = buildReport(weekLog(), OPTS); // no corrections, no retroactive writes
+    expect(r.correctionMeter.total).toBe(0);
+    expect(r.retroactive).toBeNull();
+    const text = formatReportText(r, (id) => id, 'demo');
+    expect(text).not.toContain('⚠ 訂正・遡及');
+    expect(text).not.toContain('訂正記録 総数');
+    expect(text).not.toContain('遡及書き込み');
   });
 });
 

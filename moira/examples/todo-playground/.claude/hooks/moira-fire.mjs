@@ -1,6 +1,6 @@
 // moira-fire.mjs — Claude Code hook: the deterministic FIRING DETECTOR of the
 // methodology → Moira adapter. Distributed by `moira adapter install`
-// (canonical source: sdd-workshop moira/cli/templates/).
+// (canonical source: PrimeBrains/moira moira/cli/templates/).
 //
 // The playground proved that convention-only firing (a trigger table the LLM is
 // supposed to obey) misses milestones. This hook makes the DETECTION

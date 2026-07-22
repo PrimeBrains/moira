@@ -1,0 +1,93 @@
+diff --git a/.kiro/scenarios/units/schedule-leveled.md b/.kiro/scenarios/units/schedule-leveled.md
+index b4a3eac..7cbe42f 100644
+--- a/.kiro/scenarios/units/schedule-leveled.md
++++ b/.kiro/scenarios/units/schedule-leveled.md
+@@ -38,7 +38,7 @@ touches_requirements:
+ 
+ 太郎の日次容量：1.0人日/日（既定）。今日は 2026-07-01（X の作業が今日から入っている）。
+ 
+-<small>※ 順序について：X（ノード ID 例 `X/req`）と Y（`Y/req`）は同じ太郎の容量を奪い合うため、平準化で**同日に二重に積まれず逐次化**される（本ユニットの主眼）。X が先（7/1〜7/3）・Y が後（7/4〜7/6）になるのは、X が既に今日から入っている前提に加え、平準化のクリティカルパスが同点（ともに 3 日・後続なし）のとき tie-break が nodeId 昇順（`X/req` < `Y/req`）だから（[leveler.ts:104](../../moira/backend/src/leveler.ts)）。確かめたいのは「同じ人の2作業は同日に重ならず順に並ぶ」点であって、どちらが先かの厳密規則ではない（依存辺は無い）。</small>
++<small>※ 順序について：X（ノード ID 例 `X/req`）と Y（`Y/req`）は同じ太郎の容量を奪い合うため、平準化で**同日に二重に積まれず逐次化**される（本ユニットの主眼）。X が先（7/1〜7/3）・Y が後（7/4〜7/6）になるのは、X が既に今日から入っている前提に加え、平準化のクリティカルパスが同点（ともに 3 日・後続なし）のとき tie-break が nodeId 昇順（`X/req` < `Y/req`）だから（[leveler.ts:104](../../../moira/backend/src/leveler.ts)）。確かめたいのは「同じ人の2作業は同日に重ならず順に並ぶ」点であって、どちらが先かの厳密規則ではない（依存辺は無い）。</small>
+ 
+ ## 3. ふるまい（When / Then）
+ 
+diff --git a/.kiro/scenarios/units/schedule-rebaseline.md b/.kiro/scenarios/units/schedule-rebaseline.md
+index 1c861c1..1865a7d 100644
+--- a/.kiro/scenarios/units/schedule-rebaseline.md
++++ b/.kiro/scenarios/units/schedule-rebaseline.md
+@@ -50,7 +50,7 @@ And   これは自動の予測導出ではなく人間の明示的な書き込
+       動かしたわけではない（基準を動かすのは理由付き再ベースラインだけ）。
+ ```
+ 
+-<small>注：「再ベースライン」は凍結属性の理由付き改訂で、未完了サブ単位の基準スロットを引き直す（MODEL §3 導出指標「再ベースライン」・[MODEL.md](../../moira/MODEL.md)）。これは **SPEC で明示的に許された操作**——moira-core 7.3 が「初回スケジュールのスロットは**明示的な理由付き再ベースラインを除き**不変」と例外を明文化し（[requirements.md:140](../../.kiro/specs/moira-core/requirements.md)）、7.4 が完了時の I4 施錠を規定する（[requirements.md:142](../../.kiro/specs/moira-core/requirements.md)）。ゆえに Req12 AC2 が禁じる「**予測導出中**の基準上書き」とは矛盾しない——AC2 の不可侵は自動 forecast 導出に対するもので（[requirements.md:185](../../.kiro/specs/moira-schedule/requirements.md)）、人間が明示的に発行する理由付き再ベースラインの書き込みは core 7.3 が別経路として認める。「遅延標識の解除」は moira-schedule 6.3（[requirements.md:103](../../.kiro/specs/moira-schedule/requirements.md)：理由付き再ベースラインがスロットを引き直したとき、または予測がスロットへ再収束したときにのみ解除）。**⚠ 重要：この挙動は core 7.3 が SPEC として許可（carve-out）するが義務化はしておらず、その write は `moira-rebaseline`（⚠未実装）skill 所有・現行 engine（fold.ts）のガード拡張も要る**——詳細は §7 #1。ノード ID・ts 値はユニット内ローカルの例示（他ユニットの同名 ID と同一実体を指さない）。</small>
++<small>注：「再ベースライン」は凍結属性の理由付き改訂で、未完了サブ単位の基準スロットを引き直す（MODEL §3 導出指標「再ベースライン」・[MODEL.md](../../../moira/MODEL.md)）。これは **SPEC で明示的に許された操作**——moira-core 7.3 が「初回スケジュールのスロットは**明示的な理由付き再ベースラインを除き**不変」と例外を明文化し、7.4 が完了時の I4 施錠を規定する。ゆえに Req12 AC2 が禁じる「**予測導出中**の基準上書き」とは矛盾しない——AC2 の不可侵は自動 forecast 導出に対するもので、人間が明示的に発行する理由付き再ベースラインの書き込みは core 7.3 が別経路として認める。「遅延標識の解除」は moira-schedule 6.3（理由付き再ベースラインがスロットを引き直したとき、または予測がスロットへ再収束したときにのみ解除）。**⚠ 重要：この挙動は core 7.3 が SPEC として許可（carve-out）するが義務化はしておらず、その write は `moira-rebaseline`（⚠未実装）skill 所有・現行 engine（fold.ts）のガード拡張も要る**——詳細は §7 #1。ノード ID・ts 値はユニット内ローカルの例示（他ユニットの同名 ID と同一実体を指さない）。</small>
+ 
+ ## 4. 画面の変化（Before → After）
+ 
+@@ -183,9 +183,9 @@ And   これは自動の予測導出ではなく人間の明示的な書き込
+ ]
+ ```
+ 
+-<small>注：基準スロットは lifecycle `transition` の `frozenSlot` 属性に乗る（初回スケジュール載せと同型——[schedule-leveled](./schedule-leveled.md) で扱った →ready 凍結と同じ機構。イベント ID はユニット内ローカルの例示で、同名 ID が他ユニットと同一実体を指すわけではない）。Y は既に `ready` ゆえ **状態保持の自己遷移**（to=ready）で属性だけを改訂する（assign-spec-provisional の暫定割当が状態保持遷移に assignee を載せるのと同型）。`reason` は再ベースラインで**必須**（R-U7＝[MODEL R-U7](../../moira/MODEL.md)・§3 導出指標）。参照実装の型は [types.ts](../../moira/backend/src/types.ts) の `reason?` フィールド（同コメント内の MODEL 行番号アンカーは v21 の §2.10 節挿入で陳腐化——正しい参照先は R-U7；types.ts 側アンカーの是正は参照実装同期 issue #6 の管轄〔fact-check C6〕）。これにより遅れ標識が moira-schedule 6.3 で解除される。
++<small>注：基準スロットは lifecycle `transition` の `frozenSlot` 属性に乗る（初回スケジュール載せと同型——[schedule-leveled](./schedule-leveled.md) で扱った →ready 凍結と同じ機構。イベント ID はユニット内ローカルの例示で、同名 ID が他ユニットと同一実体を指すわけではない）。Y は既に `ready` ゆえ **状態保持の自己遷移**（to=ready）で属性だけを改訂する（assign-spec-provisional の暫定割当が状態保持遷移に assignee を載せるのと同型）。`reason` は再ベースラインで**必須**（R-U7＝[MODEL R-U7](../../../moira/MODEL.md)・§3 導出指標）。参照実装の型は [types.ts](../../../moira/backend/src/types.ts) の `reason?` フィールド（同コメント内の MODEL 行番号アンカーは v21 の §2.10 節挿入で陳腐化——正しい参照先は R-U7；types.ts 側アンカーの是正は参照実装同期 issue #6 の管轄〔fact-check C6〕）。これにより遅れ標識が moira-schedule 6.3 で解除される。
+ 
+-**⚠ 実装ギャップ（§7 #1）:** 現行 engine（[fold.ts:113-118](../../moira/backend/src/fold.ts)）は `n.frozenSlot === null` ガードで **初回スロットのみ記録し、後続の frozenSlot（reason 付きでも）を無視する**——つまりこの e080 は現状の engine では frozenSlot を更新しない。本ユニットの挙動は **moira-core 7.3 が SPEC として許可（carve-out）するが義務化はしておらず**、その write は `moira-rebaseline`（⚠未実装）skill 所有、かつ engine ガードの拡張（reason 付き＝未完了なら上書き／完了なら I4 拒否）も要る＝**2層の実装タスク**（MODEL/spec 側に欠陥は無い。詳細は §7 #1）。ノード ID・ts 値は例示。</small>
++**⚠ 実装ギャップ（§7 #1）:** 現行 engine（[fold.ts:113-118](../../../moira/backend/src/fold.ts)）は `n.frozenSlot === null` ガードで **初回スロットのみ記録し、後続の frozenSlot（reason 付きでも）を無視する**——つまりこの e080 は現状の engine では frozenSlot を更新しない。本ユニットの挙動は **moira-core 7.3 が SPEC として許可（carve-out）するが義務化はしておらず**、その write は `moira-rebaseline`（⚠未実装）skill 所有、かつ engine ガードの拡張（reason 付き＝未完了なら上書き／完了なら I4 拒否）も要る＝**2層の実装タスク**（MODEL/spec 側に欠陥は無い。詳細は §7 #1）。ノード ID・ts 値は例示。</small>
+ 
+ ## 6. 受け入れ条件（EARS）
+ 
+@@ -202,12 +202,12 @@ And   これは自動の予測導出ではなく人間の明示的な書き込
+ <!-- 検証ループ前のドラフト。対話で確定した決定＋grounding で出た実装ギャップをここに記す。 -->
+ 
+ - **🔴 最重要：理由付き再ベースラインは SPEC が「許可」するが write は未実装・engine ガードも拡張要（MODEL 欠陥ではない）:** 本ユニットの核「frozenSlot を 7/3→7/5 へ更新」について正典の所在を正確に切り分ける（当初ドラフトの「SPEC が義務化済み」は不正確で、doc-adversary R2 で是正）：
+-  - **MODEL/spec は正しい（欠陥なし）**：MODEL §3 が再ベースラインを規定（R-U7 同型・理由必須）。moira-core 7.3（[requirements.md:140](../../.kiro/specs/moira-core/requirements.md)）は「スロットは**明示的な理由付き再ベースラインを除き**不変」と再ベースラインを**明示的に許可（carve-out / permission）**し、7.4（[requirements.md:142](../../.kiro/specs/moira-core/requirements.md)）は完了次元の再ベースラインを**拒否**する。ただし 7.3 は「不変の例外として許す」permission であって「再ベースライン時に frozenSlot を上書き**せよ**」という積極的 write **義務ではない**。
+-  - **未実装は2層**：(1) frozenSlot を上書きする **write は `moira-rebaseline`（仮称・⚠未実装）write skill が所有**（他の ⚠未実装 write スキルと同様、まだ書かれていない）。(2) 加えて現行 engine（fold.ts `n.frozenSlot === null` ガード・[fold.ts:113-118](../../moira/backend/src/fold.ts)）は carve-out を**行使しない**（初回のみ記録し後続 frozenSlot を reason 付きでも無視）ため、skill が reason 付き再ベースラインを emit しても **engine ガードの拡張**（reason 付き＝未完了なら上書き／完了なら I4 拒否）が要る。engine ガードは現状 7.3 と**両立**する（7.3 が許す上限よりさらに immutable なだけで SPEC 違反ではない）。
++  - **MODEL/spec は正しい（欠陥なし）**：MODEL §3 が再ベースラインを規定（R-U7 同型・理由必須）。moira-core 7.3は「スロットは**明示的な理由付き再ベースラインを除き**不変」と再ベースラインを**明示的に許可（carve-out / permission）**し、7.4は完了次元の再ベースラインを**拒否**する。ただし 7.3 は「不変の例外として許す」permission であって「再ベースライン時に frozenSlot を上書き**せよ**」という積極的 write **義務ではない**。
++  - **未実装は2層**：(1) frozenSlot を上書きする **write は `moira-rebaseline`（仮称・⚠未実装）write skill が所有**（他の ⚠未実装 write スキルと同様、まだ書かれていない）。(2) 加えて現行 engine（fold.ts `n.frozenSlot === null` ガード・[fold.ts:113-118](../../../moira/backend/src/fold.ts)）は carve-out を**行使しない**（初回のみ記録し後続 frozenSlot を reason 付きでも無視）ため、skill が reason 付き再ベースラインを emit しても **engine ガードの拡張**（reason 付き＝未完了なら上書き／完了なら I4 拒否）が要る。engine ガードは現状 7.3 と**両立**する（7.3 が許す上限よりさらに immutable なだけで SPEC 違反ではない）。
+   - **正直な含意**：本ユニットが記述する受け入れ基準は **現状どの実装でも満たされず**、engine 単独でも満たせない（write skill 実装＋engine 拡張の両方が要る）。これは他の ⚠未実装 write スキル前提のシナリオ（estimate-propose 等が `agreed`）と同種で「シナリオが実装をリードする」標準運用だが、本件は **write skill ＋ engine 拡張の2層**が実装タスクである点を明記する。
+   - **確定方針（ユーザー裁定 2026-06-27）**：以上を承知の上で、core 7.3 が**許可**する挙動の受け入れ基準を記述する**目標シナリオとして `agreed` 化**する。実装タスク＝(1) `moira-rebaseline` write skill、(2) fold ガード拡張。前ユニット [schedule-reorder](./schedule-reorder.md) の Phenomenon B 切り出しは本ユニットで確定。moira-model-update の対象ではない（MODEL/spec は正しい）。
+ 
+-- **再ベースラインは Req12 AC2 の「基準不可侵」と矛盾しない（core 7.3 が明示的に carve-out）:** Req12 AC2（[requirements.md:185](../../.kiro/specs/moira-schedule/requirements.md)）が禁じるのは「**予測導出中**に基準を再計算・上書きすること」＝自動 forecast 経路の不可侵。本ユニットの再ベースラインは人間が明示的に発行する理由付きの書き込みで、自動導出ではない。決定的根拠は **moira-core 7.3 が「明示的な理由付き再ベースラインを**除き**不変」と例外を明文で持つ**こと（[requirements.md:140](../../.kiro/specs/moira-core/requirements.md)）——SPEC 自身が「自動導出では不変／人間の理由付き再ベースラインでのみ動く」と両経路を区別している。よって AC2 と本ユニットは両立する（「AC2 違反では？」への先回り反証。doc-fact-checker C7 で確認）。
++- **再ベースラインは Req12 AC2 の「基準不可侵」と矛盾しない（core 7.3 が明示的に carve-out）:** Req12 AC2が禁じるのは「**予測導出中**に基準を再計算・上書きすること」＝自動 forecast 経路の不可侵。本ユニットの再ベースラインは人間が明示的に発行する理由付きの書き込みで、自動導出ではない。決定的根拠は **moira-core 7.3 が「明示的な理由付き再ベースラインを**除き**不変」と例外を明文で持つ**こと——SPEC 自身が「自動導出では不変／人間の理由付き再ベースラインでのみ動く」と両経路を区別している。よって AC2 と本ユニットは両立する（「AC2 違反では？」への先回り反証。doc-fact-checker C7 で確認）。
+ 
+ - **再ベースラインは履歴を消さない（監査性・ガバナンス）:** frozenSlot の current 値は 7/5 になるが、ログには**初回凍結（7/3）**と**再ベースライン（7/5・reason 付き・本ユニット e080）**が**両方残る**（追記専用）。「遅延が消えた」は事実の隠蔽ではなく、「**理由付きで計画を更新した記録が残った**」こと。R-U7 が reason を必須化するのはこのガバナンスのため——再ベースラインで遅延を恣意的に消す濫用は、理由の必須記録と履歴不滅で抑止される。<br><small>※ 初回凍結のイベント id は本ユニット §5 に掲載しない（本ユニットの前提断面で既に凍結済み）。**id は各ユニット内ローカルの例示**ゆえ、他ユニットの同名 id（例：schedule-leveled の e061＝別フィーチャーの別値）と同一視しない。</small>
+ 
+diff --git a/.kiro/scenarios/units/schedule-reorder.md b/.kiro/scenarios/units/schedule-reorder.md
+index 61c1243..3575f38 100644
+--- a/.kiro/scenarios/units/schedule-reorder.md
++++ b/.kiro/scenarios/units/schedule-reorder.md
+@@ -51,7 +51,7 @@ And   Y は「予測が基準より遅れている」と画面に警告が出て
+ 
+ > 後続への橋渡し（本ユニットの検証対象外）：この遅れを正式に計画へ織り込み直したい場合は、別途「理由付き再ベースライン」で基準完了日そのものを引き直せる（任意・人間の判断）。それは別ユニット [schedule-rebaseline](./schedule-rebaseline.md) が扱う。
+ 
+-<small>注：「組み替え」は依存辺（`relate`／dependency）Z→Y の追加で表現する——Moira に手動の優先度フィールドは無く、順序は平準化（leveler）の (1)依存（トポロジカル）→(2)クリティカルパス長→(3)nodeId昇順 で決まるため、人間が任意順序を指定する手段は依存辺である（§7 #3）。「予測だけ動き基準は不変」は MODEL §3（凍結ベースライン PV/SPI と生きた予測 P7/P8 の分離・[MODEL.md:218](../../moira/MODEL.md)）。「予測が基準に遅延」は R-S7 スロット陳腐化（moira-schedule Req6）で、参照実装では Inspector の `forecastBehind`＝`予測 > 基準` 判定→警告ピル（[Inspector.tsx:61-62,167](../../moira/frontend/src/surfaces/schedule/Inspector.tsx)）。組み替えの write を担うスキル（リスケ系・⚠未実装）は本ユニットの対象外。</small>
++<small>注：「組み替え」は依存辺（`relate`／dependency）Z→Y の追加で表現する——Moira に手動の優先度フィールドは無く、順序は平準化（leveler）の (1)依存（トポロジカル）→(2)クリティカルパス長→(3)nodeId昇順 で決まるため、人間が任意順序を指定する手段は依存辺である（§7 #3）。「予測だけ動き基準は不変」は MODEL §3（凍結ベースライン PV/SPI と生きた予測 P7/P8 の分離・[MODEL.md:218](../../../moira/MODEL.md)）。「予測が基準に遅延」は R-S7 スロット陳腐化（moira-schedule Req6）で、参照実装では Inspector の `forecastBehind`＝`予測 > 基準` 判定→警告ピル（[Inspector.tsx:61-62,167](../../../moira/frontend/src/surfaces/schedule/Inspector.tsx)）。組み替えの write を担うスキル（リスケ系・⚠未実装）は本ユニットの対象外。</small>
+ 
+ ## 4. 画面の変化（Before → After）
+ 
+@@ -190,7 +190,7 @@ And   Y は「予測が基準より遅れている」と画面に警告が出て
+ ]
+ ```
+ 
+-<small>注：`from: "Z/req"`（先行）→ `to: "Y/req"`（後続）で「Y は Z を待つ」＝ Z を先に行う順序を表す（`RelateEvent` の from=predecessor/to=successor は [types.ts:71-72](../../moira/backend/src/types.ts)）。この追記で derive() が再実行され（R-S2）平準化が Z→Y 順に引き直す。**frozenSlot 属性を持つ transition は一切発行しない**——順序組み替えは生きた予測（P7/P8）だけを動かし、凍結ベースラインには触れない（fold.ts は frozenSlot を初回のみ記録し以後不変・[fold.ts:116](../../moira/backend/src/fold.ts)）。新しいイベント種別・可変状態は増やさない（4イベントの範囲内＝moira-core 1.3／relate スキーマは 3.3）。`relate add` は循環があれば fold が拒否するが（moira-core 9.1）、本ユニットの前提は依存辺ゼロゆえ循環は起きない。ノード ID・ts 値はユニット内ローカルの例示（他ユニットの同名 ID と同一実体を指さない）。組み替えを取り消すには同じ辺の `op:"remove"` を追記すれば予測は元へ再収束し、遅れ標識は解除される（再収束による解除＝moira-schedule 6.3）。</small>
++<small>注：`from: "Z/req"`（先行）→ `to: "Y/req"`（後続）で「Y は Z を待つ」＝ Z を先に行う順序を表す（`RelateEvent` の from=predecessor/to=successor は [types.ts:71-72](../../../moira/backend/src/types.ts)）。この追記で derive() が再実行され（R-S2）平準化が Z→Y 順に引き直す。**frozenSlot 属性を持つ transition は一切発行しない**——順序組み替えは生きた予測（P7/P8）だけを動かし、凍結ベースラインには触れない（fold.ts は frozenSlot を初回のみ記録し以後不変・[fold.ts:116](../../../moira/backend/src/fold.ts)）。新しいイベント種別・可変状態は増やさない（4イベントの範囲内＝moira-core 1.3／relate スキーマは 3.3）。`relate add` は循環があれば fold が拒否するが（moira-core 9.1）、本ユニットの前提は依存辺ゼロゆえ循環は起きない。ノード ID・ts 値はユニット内ローカルの例示（他ユニットの同名 ID と同一実体を指さない）。組み替えを取り消すには同じ辺の `op:"remove"` を追記すれば予測は元へ再収束し、遅れ標識は解除される（再収束による解除＝moira-schedule 6.3）。</small>
+ 
+ ## 6. 受け入れ条件（EARS）
+ 
+@@ -206,12 +206,12 @@ And   Y は「予測が基準より遅れている」と画面に警告が出て
+ 
+ <!-- 検証ループ前のドラフト。対話で確定した決定＋grounding で出た開放論点をここに記す。 -->
+ 
+-- **本ユニット = 組み替え→予測ずれ→遅延可視（Phenomenon A・実装済）。「基準スロット自体の引き直し」（Phenomenon B）は別扱い:** 本ユニットが描くのは「順序を組み替えると**生きた予測だけ**が動き、**凍結ベースラインは不変**のまま、差が R-S7 遅延として見える」経路で、これは参照実装で動く（leveler 再導出＋Inspector `forecastBehind`/R-S7 ピル）。これに対し**基準完了日そのものを引き直す「理由付き再ベースライン」（Phenomenon B）は core 7.3 が SPEC として許可（carve-out）するが、その write は `moira-rebaseline`（⚠未実装）skill 所有・現行 engine の fold ガード拡張も要る**（fold.ts は `n.frozenSlot === null` ガードで初回スロットを不変に保ち後続の frozenSlot を無視・[fold.ts:113-118](../../moira/backend/src/fold.ts)。MODEL/spec 側に欠陥は無い）。**Phenomenon B は別ユニット [schedule-rebaseline](./schedule-rebaseline.md) として切り出すことでユーザー裁定済み**（正確な切り分けは当該ユニット §7 #1。本ユニット §3 末尾は「任意で引き直せる」と触れて後続ユニットへ橋渡しするに留め、主たる Then には含めない）。
++- **本ユニット = 組み替え→予測ずれ→遅延可視（Phenomenon A・実装済）。「基準スロット自体の引き直し」（Phenomenon B）は別扱い:** 本ユニットが描くのは「順序を組み替えると**生きた予測だけ**が動き、**凍結ベースラインは不変**のまま、差が R-S7 遅延として見える」経路で、これは参照実装で動く（leveler 再導出＋Inspector `forecastBehind`/R-S7 ピル）。これに対し**基準完了日そのものを引き直す「理由付き再ベースライン」（Phenomenon B）は core 7.3 が SPEC として許可（carve-out）するが、その write は `moira-rebaseline`（⚠未実装）skill 所有・現行 engine の fold ガード拡張も要る**（fold.ts は `n.frozenSlot === null` ガードで初回スロットを不変に保ち後続の frozenSlot を無視・[fold.ts:113-118](../../../moira/backend/src/fold.ts)。MODEL/spec 側に欠陥は無い）。**Phenomenon B は別ユニット [schedule-rebaseline](./schedule-rebaseline.md) として切り出すことでユーザー裁定済み**（正確な切り分けは当該ユニット §7 #1。本ユニット §3 末尾は「任意で引き直せる」と触れて後続ユニットへ橋渡しするに留め、主たる Then には含めない）。
+ 
+-- **R-S7 は cause-agnostic で依存辺起因の陳腐化も検出対象（当初の「MODEL ギャップ」懸念は検証で解消）:** 検証ループで R-S7 が DECISIONS.md:55 で **cause-agnostic 化**済みと確認した（陳腐化トリガーを「割当変更」から「生きた予測の完了が凍結スロットと乖離（原因＝割当/c のいずれでも）」へ一般化）。よって**依存辺（relate）の追加による乖離も R-S7 の検出対象に当然入っている**——本ユニットの「Y のスロットが陳腐化＝遅れ」は正典に完全に裏付けられ、検出に穴は無い。MODEL R-S7（[MODEL.md:326-327](../../moira/MODEL.md)）／moira-schedule 6.1（[requirements.md:99](../../.kiro/specs/moira-schedule/requirements.md)）が原因例として挙げる「割当変更・容量 c 変更」は "regardless of cause" の後の**例示**であって網羅列挙ではない。**残る論点は最小**：requirements.md 6.1 の「原因別提示」の例に「依存辺変更」を明示追加すれば親切（Suggestion レベルの spec 文言整備）。**MODEL 正典側に欠陥は無く moira-model-update は不要**——当初ドラフトの「ESCALATE 候補」評価は過大だったので撤回する（検証ループの doc-fact-checker C3 で確定）。
++- **R-S7 は cause-agnostic で依存辺起因の陳腐化も検出対象（当初の「MODEL ギャップ」懸念は検証で解消）:** 検証ループで R-S7 が DECISIONS.md:55 で **cause-agnostic 化**済みと確認した（陳腐化トリガーを「割当変更」から「生きた予測の完了が凍結スロットと乖離（原因＝割当/c のいずれでも）」へ一般化）。よって**依存辺（relate）の追加による乖離も R-S7 の検出対象に当然入っている**——本ユニットの「Y のスロットが陳腐化＝遅れ」は正典に完全に裏付けられ、検出に穴は無い。MODEL R-S7（[MODEL.md:326-327](../../../moira/MODEL.md)）／moira-schedule 6.1が原因例として挙げる「割当変更・容量 c 変更」は "regardless of cause" の後の**例示**であって網羅列挙ではない。**残る論点は最小**：requirements.md 6.1 の「原因別提示」の例に「依存辺変更」を明示追加すれば親切（Suggestion レベルの spec 文言整備）。**MODEL 正典側に欠陥は無く moira-model-update は不要**——当初ドラフトの「ESCALATE 候補」評価は過大だったので撤回する（検証ループの doc-fact-checker C3 で確定）。
+ 
+-- **Moira に手動の優先度フィールドは無い — 「Z を Y より先に」は依存辺で表現する:** 平準化（leveler）の順序は (1)依存（トポロジカル）→(2)クリティカルパス長→(3)nodeId昇順 で決まり（[leveler.ts:99-112](../../moira/backend/src/leveler.ts)）、人間が任意順序を上書きする専用フィールドは存在しない。ゆえに「Z を先に」は依存辺 Z→Y（`relate`/dependency）で表し、leveler が earliest-start（先行の予測完了+1日）で順序を守る。この依存辺による表現は忠実かつ機能的で、本ユニットの検証を妨げない。**純粋な優先度（真の技術的依存ではない単なる順序希望）に独自プリミティブを要するか**は将来の設計論点（FYI）として残すに留め、本ユニットでは ESCALATE しない（現行プリミティブで成立するため）。
++- **Moira に手動の優先度フィールドは無い — 「Z を Y より先に」は依存辺で表現する:** 平準化（leveler）の順序は (1)依存（トポロジカル）→(2)クリティカルパス長→(3)nodeId昇順 で決まり（[leveler.ts:99-112](../../../moira/backend/src/leveler.ts)）、人間が任意順序を上書きする専用フィールドは存在しない。ゆえに「Z を先に」は依存辺 Z→Y（`relate`/dependency）で表し、leveler が earliest-start（先行の予測完了+1日）で順序を守る。この依存辺による表現は忠実かつ機能的で、本ユニットの検証を妨げない。**純粋な優先度（真の技術的依存ではない単なる順序希望）に独自プリミティブを要するか**は将来の設計論点（FYI）として残すに留め、本ユニットでは ESCALATE しない（現行プリミティブで成立するため）。
+ 
+-- **asOf=7/1（着手前の計画時点）では SV=0 のまま — 遅延は SV でなく R-S7 予測乖離で出る:** 凍結スロット（Y=7/3・Z=7/5）はいずれも asOf（7/1）より後なので PV 未算入（`scheduledByNow=false`）、よって SV=EV−PV=0（[Inspector.tsx:52,55](../../moira/frontend/src/surfaces/schedule/Inspector.tsx)）。遅延は「予測 > 基準」の `forecastBehind`（R-S7）として**前向きに**現れる。これは「計画段階では PV はまだ立たないが、予測の基準超過は即座に警告できる」という早期警戒の正直な姿であり、本ユニットの主たる検証点。
++- **asOf=7/1（着手前の計画時点）では SV=0 のまま — 遅延は SV でなく R-S7 予測乖離で出る:** 凍結スロット（Y=7/3・Z=7/5）はいずれも asOf（7/1）より後なので PV 未算入（`scheduledByNow=false`）、よって SV=EV−PV=0（[Inspector.tsx:52,55](../../../moira/frontend/src/surfaces/schedule/Inspector.tsx)）。遅延は「予測 > 基準」の `forecastBehind`（R-S7）として**前向きに**現れる。これは「計画段階では PV はまだ立たないが、予測の基準超過は即座に警告できる」という早期警戒の正直な姿であり、本ユニットの主たる検証点。
+ 
+ - **カレンダーの穴（c=0日＝週末・休暇）は簡略化:** 本ユニットの日付は容量 1.0人日/日（週末を無視）の例示。c=0 日が暦の穴としてスケジュール gap になる挙動は別途（姉妹ユニット [schedule-leveled](./schedule-leveled.md) と同じ簡略化方針——両ユニットに同趣旨の注記を揃える）。

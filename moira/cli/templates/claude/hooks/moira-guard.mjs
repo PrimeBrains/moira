@@ -1,5 +1,5 @@
 // moira-guard.mjs — Claude Code hook: the "fence" layer of the cc-sdd → Moira adapter.
-// Distributed by `moira adapter install` (canonical source: sdd-workshop moira/cli/templates/).
+// Distributed by `moira adapter install` (canonical source: PrimeBrains/moira moira/cli/templates/).
 //
 // It catches the firing-misses that recurred across two real demo runs (see the
 // playground demo-log.take1.md). ONE behavior is a hard enforcement, the rest are advisory:

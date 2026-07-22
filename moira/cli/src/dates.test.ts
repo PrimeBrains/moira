@@ -73,15 +73,21 @@ describe('MoiraRepo dates.json (append-only second tier)', () => {
 describe('moira deadline (CLI)', () => {
   const cwd0 = process.cwd();
   let tmp: string;
+  let savedMoiraDir: string | undefined;
   beforeEach(async () => {
     tmp = mkdtempSync(join(tmpdir(), 'moira-dl-'));
     process.chdir(tmp);
+    // Isolate from ambient MOIRA_DIR (resolveMoiraHome env > cwd walk).
+    savedMoiraDir = process.env.MOIRA_DIR;
+    delete process.env.MOIRA_DIR;
     await runCli(['init', '--me', 'me', '--root', 'p']);
   });
   afterEach(() => {
     process.chdir(cwd0);
     rmSync(tmp, { recursive: true, force: true });
     vi.restoreAllMocks();
+    if (savedMoiraDir === undefined) delete process.env.MOIRA_DIR;
+    else process.env.MOIRA_DIR = savedMoiraDir;
   });
 
   it('sets deadline and target, appends a reason-stamped history', async () => {

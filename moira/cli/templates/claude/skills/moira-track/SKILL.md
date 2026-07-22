@@ -16,15 +16,15 @@ metadata:
 
 # moira-track Skill
 
-> **managed file**: この skill は `moira adapter install` が設置する配布物（正本は sdd-workshop
-> `moira/cli/templates/`）。手で編集すると次回 install で skip される（`moira adapter status` 参照）。
+> **managed file**: この skill は `moira adapter install` が設置する配布物（正本は本リポ
+> `PrimeBrains/moira` の `moira/cli/templates/`）。手で編集すると次回 install で skip される（`moira adapter status` 参照）。
 
 開発方法論（provider）の各フェーズが完了した節目で、その事実を **`moira` CLI** で追記専用イベントとして
 記録するアダプタ。これにより開発者は普段のプロセスを回すだけで、Moira ダッシュボードに
 達成率（EV%）・見積カバレッジ・lifecycle の「正直な弧」が `new-feature-happy-path` と同じ筋で立ち上がる。
 
-> **このスキルの正体**: 背骨フロー [`new-feature-happy-path`](https://github.com/PrimeBrains/sdd-workshop/blob/main/.kiro/scenarios/flows/new-feature-happy-path.md) §5 と
-> [ADR-0001](https://github.com/PrimeBrains/sdd-workshop/blob/main/.kiro/adr/0001-moira-cli-write-path.md) が名指す **`moira-progress` 継ぎ目の実体**（配布は [ADR-0002](https://github.com/PrimeBrains/sdd-workshop/blob/main/.kiro/adr/0002-cc-sdd-moira-adapter.md)・宣言的 provider 化は ADR-0003）。
+> **このスキルの正体**: 背骨フロー [`new-feature-happy-path`](https://github.com/PrimeBrains/moira/blob/main/.kiro/scenarios/flows/new-feature-happy-path.md) §5 と
+> [ADR-0001](https://github.com/PrimeBrains/moira/blob/main/.kiro/adr/0001-moira-cli-write-path.md) が名指す **`moira-progress` 継ぎ目の実体**（配布は [ADR-0002](https://github.com/PrimeBrains/moira/blob/main/.kiro/adr/0002-cc-sdd-moira-adapter.md)・宣言的 provider 化は ADR-0003）。
 > フロー文書 §5 は本スキル以前の断面で「⚠ 未実装（仮称）」と注記したまま — 本スキルがその実体化だが、
 > 想定された**自動 emit ではなく**、hooks の決定的検知＋本スキルの振り付けによる**手動ブリッジ**である点は異なる（正直な差分）。
 > 方法論側のツール（cc-sdd なら `kiro-spec-*`）は moira を知らない — その起動/完了を moira の状態遷移に写すのが本スキルの役割。
@@ -64,7 +64,7 @@ metadata:
 
 ## 前提
 
-- `moira` CLI がグローバルに入っていること（sdd-workshop `moira/cli` README の npm link セットアップ。未導入なら案内して停止）。
+- `moira` CLI がグローバルに入っていること（本リポ `PrimeBrains/moira` の `moira/cli/README.md` の npm link セットアップ。未導入なら案内して停止）。
 - ログ home は `--dir`（グローバル）→ `MOIRA_DIR` → `.moira` ポインタファイル/上位探索 → カレント の順で解決される（multi-repo・ADR-0003。単一リポは従来どおりカレント直下の `.moira/`）。本スキル・hooks・provider 設定・steering 発火表は `moira adapter install` が設置する（`moira adapter status` で検査）。
 - （任意）`.claude/settings.json` の hooks が有効だと footgun を deny/助言で補強する。hooks 未登録・非対応でも本スキルの規律だけで正しく回せる（hooks はセーフティネット）。
 
@@ -204,7 +204,7 @@ ticket 入口で**先回り emit しない**（二重誕生禁止）。
 
 ## Safety & Fallback
 
-- `moira` 未導入（`command not found`）: sdd-workshop `moira/cli` README のセットアップ（backend/frontend build＋`npm link`）を案内して停止。
+- `moira` 未導入（`command not found`）: 本リポ `PrimeBrains/moira` の `moira/cli/README.md` のセットアップ（backend/frontend build＋`npm link`）を案内して停止。
 - `.moira/` 不在: `moira init` を先に（provider の最初のフェーズが自動で行う。`<root>` は `[人間確認]`）。
 - フィーチャー名が不明: [provider-reference §P1](provider-reference.md) の解決手順（成果物を Glob/Read して候補提示）→ `--feature` を確認。
 - 誤った親付けで木が壊れて見える: [reference §F](reference.md) の再 add 補償で復旧（`--parent` 徹底で再発防止）。

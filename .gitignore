@@ -1,2 +1,5 @@
 node_modules/
 PROMPT.md
+# 変更管理フローの issue 専用 worktree（steering moira-change-management §7「作業の隔離」）。
+# 親チェックアウトから untracked として見えるため無視する（P5 未マップ差分検査の自己除外と同趣旨）。
+.claude/worktrees/

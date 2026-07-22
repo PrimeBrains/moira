@@ -7,45 +7,56 @@ issue: 7
 
 ## 入口種別
 
-issue直（(a) GitHub issue。PrimeBrains/moira#7「シナリオ文言同期——I4 v21 精密化（『完了済みは黙っては変わらない』）への追随」。発生元は issue #2 変更管理フローの追跡付き deferred 行 R11/R12——deferred の追跡先 issue がフロー入口 (a) として再入する形）
+issue直（＋ issue #2 P5 の追跡付き deferred 行 R11/R12 の追跡先。issue #2 台帳
+`moira/changes/issue-2/impact-map.md` R11/R12・`closure-report.md` 参照）
+
+原文: https://github.com/PrimeBrains/moira/issues/7
 
 ## 明確化した変更要求文
 
-MODEL v21（issue #2・確定 20a639e）で I4 完了施錠が「完了済みは変わらない」から
-**「完了済みは、黙っては変わらない」**（意味的再ベースライン不可は不変・記録誤りの訂正は §2.10 で
-可能かつ音が鳴る）へ精密化されたことに伴い、受け入れシナリオ unit 2 件の**注記・前提記述の文言**を
-新正典に同期する。**ふるまい本体（§3 When/Then・§6 EARS）は無傷**——境界注記レベルの文言同期であり、
-新規シナリオの発案ではない。
+MODEL v21（issue #2）で不変条件 **I4 完了施錠**が「完了済みは変わらない」から
+「**完了済みは、黙っては変わらない**」へ精密化された（意味的な再ベースライン／再見積は完了で
+施錠され不可のまま＝不変。一方、**記録の誤り**の修理は §2.10 の訂正として完了済みノードにも
+届き、施錠対象への訂正として reason 必須＋訂正計器の専用区分で常設表示される＝「音が鳴る」）。
 
-対象と改稿方針（issue 本文の記述を発案として扱う——steering §3 S 行「既存 unit の変更は issue に
-人間が書いた記述を発案として扱う」）:
+これに伴い、この切り分けを断定していない旧い言い回しを持つ受け入れシナリオ unit の**注記・
+決定事項レベルの文言**を v21 の切り分けへ同期する。**ふるまい本体（When/Then）・EARS 受入条件は
+無傷**——同期対象は境界注記・決定事項・MODEL 参照リンクに限る。
 
-1. `.kiro/scenarios/units/schedule-rebaseline.md`（agreed）: §7 決定事項の「完了サブ単位は
-   再ベースライン不可（I4 施錠）」という断定を、v21 の切り分け——**意味的再ベースライン不可は不変・
-   記録誤りの訂正は §2.10 で可能かつ計器で音が鳴る**——に整合する文言へ改める。
-2. `.kiro/scenarios/units/requirements-spec-returned.md`（in-review）: §1/§7 の「後付け分割は
-   I4 完了施錠・R-E3 に抵触し却下」の前提記述を同様に精密化する。**却下の結論自体は不変**
-   （後付け分割は意味的変更であり記録誤りの訂正ではない）。
-
-原文: https://github.com/PrimeBrains/moira/issues/7
+対象:
+1. `.kiro/scenarios/units/schedule-rebaseline.md`（agreed）§7 決定事項の
+   「完了サブ単位は再ベースライン不可（I4 施錠）」断定 → v21 の切り分けへ整合。
+2. 同 unit の MODEL 行番号アンカー（v21 の §2.10 節挿入で陳腐化）→ 安定 clause/節参照へ是正。
+3. `.kiro/scenarios/units/requirements-spec-returned.md`（in-review）§1/§7 の
+   「後付け分割は I4 完了施錠・R-E3 に抵触し却下」の前提記述 → v21 整合
+   （却下の結論自体は不変——後付け分割は意味的変更であり記録誤りの訂正ではない）。
 
 ## 候補クラス（仮判定）
 
 | クラス | 該当 | 根拠 |
 |---|---|---|
-| M（MODEL・正典設計物級） | N | MODEL v21 は確定済み（issue #2）。本 issue は下流同期のみで正典に触れない |
-| D（設計判断級） | N | 構造判断なし——確定済み正典への文言追随 |
-| P（プロパティ級） | N | プロパティ一文・PBT 資産に触れない（issue #2 R4 で再批准済み） |
-| S（シナリオ級） | Y | agreed/in-review の受け入れシナリオ unit 2 件の文言変更。kiro-scenario（既存 unit 改稿ルート） |
-| C（コード級） | N（暫定） | §6 EARS 無傷のため E2E spec 再生成は不要見込み（P2 で SPEC_META・被覆定義を照合して確認） |
-| V（検証基盤級） | N | 検知器そのものは触らない |
-| F（一般確定文書級） | N（暫定） | 他の確定文書への波及なし見込み（P2 で確認） |
+| M（MODEL・正典設計物級） | N | MODEL は改訂しない（v21 は issue #2 で確定済み）。本 issue は正典追随のみ |
+| D（設計判断級） | N | 新規構造判断なし |
+| P（プロパティ級） | N | 不変条件の新設・改訂なし |
+| S（シナリオ級） | **Y** | 確定/レビュー中の受け入れシナリオ unit の文言同期（境界注記・決定事項レベル） |
+| C（コード級） | N | 参照実装・計器の実装同期は別 issue #6 |
+| V（検証基盤級） | N | 検知器の変更なし |
+| F（一般確定文書級） | N | steering/agent 定義の改訂なし |
 
 ## triage 判定
 
 判定: フル工程
-理由: agreed な受け入れシナリオ unit（確定文書）の改稿であり kiro-scenario ゲート必須。issue #2 の deferred 行の追跡先として閉包証跡の連鎖を要するため。
+理由: agreed な受け入れシナリオ unit（確定文書）の改稿であり kiro-scenario ゲート必須、
+かつ issue #2 deferred 行（R11/R12）の追跡先として閉包証跡の連鎖を要するため。
 
 ## base commit
 
-8eb1b6f975f98b79612afecaa47873a5cec1dc83
+P1 受付時点（2026-07-20）の記録 base: **8eb1b6f**（issue #2 P5 閉包 commit）。
+
+**実効 base の再アンカー（差分検査用）**: P1 記録後、本 issue と独立の別変更が 2 件、独立コミットで
+main に介在した——(1) issue #5（CLOSED・リポジトリ自立化）の `fed1500`・`df99c48`、(2) issue #6
+（OPEN・普遍訂正原則の実装同期）の `feeecff`（P5 照合中に別セッション/タスクが staged 作業を
+コミット＋push）。いずれも本 issue #7 の波及先ではないため、未マップ差分検査（P4 各ゲート完了時・
+P5）の**実効 base を、本 issue 着手直前の commit = `feeecff` に再アンカー**する
+（`diff(feeecff..HEAD)` で検査）。steering §2 P1「変更開始前 commit」の趣旨に忠実であり、介在した
+無関係な別変更を本 issue の差分に混入させないための操作である。

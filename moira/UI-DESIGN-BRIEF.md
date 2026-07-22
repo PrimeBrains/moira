@@ -3,6 +3,7 @@
 > 由来: UI 専門家 × Moira ドメイン専門家の敵対ディベート（9エージェント / Positions→Debate→Audit→Synthesis）の合成成果。`moira-adversary` 監査で検出した Critical 4 / Important 6 / Minor 3 を全件 §0 に織り込み済み。
 > 位置づけ: `moira/MODEL.md`（正典 v14）と `moira/UI-ARCHITECTURE.md`（5サーフェス・被覆表）を**上位**とし、本書はそれを UI 実装へ写像する設計判断を確定する。両者と矛盾した場合は正典が優先。
 > 対象実装: `moira/frontend/`（Vite + React + TS、backend `derive()` 直 import）。
+> プロトタイプ名（`evm-studio`・`sdd-dashboard`）の参照について: 本書中で設計語彙・対比対象として引用するこれらのプロトタイプは、実体は本リポではなく旧リポ `PrimeBrains/sdd-workshop` に残置している（詳細は [`PROTOTYPE-EVALUATION.md`](./PROTOTYPE-EVALUATION.md) の対象一覧を参照）。
 
 ---
 

@@ -9,25 +9,31 @@ issue: 7
 
 ### ① 3面最終文 ↔ 批准済み意図の対応表
 
-| 行 ID | 面 | 対象 | 批准済み意図（intent-ratification.md） | agreed/確定 最終文 | 整合 |
-|---|---|---|---|---|---|
-| R1 | S | シナリオ「再ベースライン」の I4 境界注記 | 「完了済みは引き直せない」の言い切りを v21 の切り分け（意味的な引き直しは今も不可・記録誤りの訂正は届くが理由必須＋計器常設表示＝黙っては直せない）へ。ふるまい本体は不変 | §6 注記・§7 決定事項が「意味的な再ベースライン不可（不変）／記録の誤りの訂正は §2.10 で届き、施錠対象への訂正は理由必須＋計器常設表示——『完了済みは、黙っては変わらない』」に。§3/§6 EARS 本文は全ラウンド不変（独立ベンダーが diff 確認）。施錠の次元 caveat（予算=合意済みのみ・スロット=スケジュール済みのみ）も正典どおり復元 | Y |
-| R2 | S | 同シナリオの正典参照リンク | 版上げによる参照ずれの是正を含める（行番号アンカー→節参照） | MODEL 参照 2 箇所を節参照化＋相対パス深度是正（fold.ts 参照 2 箇所の誤行番号も是正）。旧注記の誤った修正処方（fact-check C6）は撤回注記で明示訂正 | Y（旧 spec 直リンクのみ #8 へ追跡——下記②） |
-| R3 | S | シナリオ「差し戻し」の按分却下の前提記述 | 前提文言のみ v21 の言葉で精密化。**却下の結論は不変**・in-review 維持・再批准は既存トラック | §1 脚注・§7 が「decompose 自体は遮断されないが葉基底から外れ EV が消える（3→0）／3→2 は確定済み粒度の遡及的作り直し＝部分EV 密輸・P5 信号消去／I4 が拒むのは完了ノード自身の凍結見積の意味的引き直し」に精密化。却下結論不変・in-review 維持 | Y |
+面: S（シナリオ）。全 4 行（R4 は E2E 波及確認の機械行）。
 
-R5（会話ログ）は機械決着（規約準拠を確認済み）。ゲートは 2 ラウンド: R1 採点 FAIL（deferred の証跡・分類不備）→是正→ R2 採点 **PASS**（早期終了・意図整合 ALIGNED・fork 被覆監査 OK）。HB は発生なし（fork F1 は批准記録が被覆——採点者が独立再検証）。
+| 行 ID | 面 | 対象 | 批准済み意図（intent-ratification ④） | agreed 最終文 | 整合 |
+|---|---|---|---|---|---|
+| R1 | S | schedule-rebaseline §7 決定「完了は再ベースライン不可（施錠）」断定を v21 精密化へ | 意味的再ベースラインは完了で施錠＝不可のまま／記録誤りの訂正は §2.10 で完了ノードにも届き「音が鳴る」／§3 When/Then・§6 EARS 不変／status=agreed 維持 | `schedule-rebaseline.md` §7（L214）：施錠が拒むのは**完了後の**意味的再ベースライン（正道 supersede §2.7）／記録誤り修理は §2.10 訂正で完了ノードにも届き reason 必須＋計器常設表示（音が鳴る）／本ユニットの未完了 Y 再ベースラインは施錠対象外の許可操作（core 7.3）で前二者と別物 | Y |
+| R2 | S | schedule-rebaseline の MODEL 行番号アンカー是正（行番号→節/clause 参照） | 行番号アンカーを §3・R-U7・I4・§2.10 の安定参照へ／types.ts 側は issue #6 管轄と明記／主張内容は不変 | `schedule-rebaseline.md` §3 注（L53）「MODEL §3 導出指標『再ベースライン』」／§5 注（L186）「R-U7・§3 導出指標」＋「MODEL 行番号アンカーは v21 §2.10 節挿入で陳腐化・types.ts 是正は issue #6 管轄」 | Y |
+| R3 | S | requirements-spec-returned §1/§7「後付け分割は I4 に抵触し却下」の前提を v21 へ | 却下は不変（後付け分割＝意味的変更ゆえ記録誤り訂正でない）／§2/§4/§5/§6 無変更・status=in-review 維持 | `requirements-spec-returned.md` §1 注（L43）・§7 決定（L411）：v21 §2.10 でも却下不変——後付け分割は意味的変更であり記録誤り訂正でないため精密化後 I4 でも施錠が拒む | Y |
+| R4 | S | E2E 波及なし確認（P5 機械証跡化） | R1〜R3 が §2/§5/§6 に触れないこと＝E2E 再生成不要 | `git diff -U0` の変更行は §7/§1 注/§3 注/§5 注のみ（L43/411・L53/186/214）。§2/§5 fixture・§6 EARS 無変更。schedule-rebaseline は E2E spec 非保有・requirements-spec-returned の E2E spec は無変更 | Y |
+
+意図整合検査（独立採点者 doc-gate-judge）: **ALIGNED**（R1(d) When/Then・EARS 不変／R3(c) 無変更・in-review 維持を確認）。
 
 ### ② できないことになったこと（平易な差分）
 
-- シナリオ注記内の**旧仕様書への直リンクは今回直していない**——参照先が旧リポジトリに残置されたままの
-  リンク切れ状態が続く（対象 unit 内 4 箇所＋他 2 unit の同型リンク。今の文書では引用 ID・条文が本文に
-  転記済みのため読解には支障なし）〔追跡 #8——処置方針はリポ自立化 issue #5 の裁定と束ねる〕。
-- シナリオ「差し戻し」は引き続き**レビュー中（in-review）のまま**——確定（agreed）への再批准は本 issue の
-  対象外で、従前からの再批准トラックに残る（新たに何かができなくなったわけではない）。
+なし（deferred 行なし——issue #7 の全行 resolved）。本 issue は issue #2 の追跡付き deferred 行
+R11/R12 の**追跡先**であり、本 issue の resolved によって issue #2 の R11/R12 も解消される。
+
+**開示（scope 外・pre-existing）**: 両 unit には旧リポ（sdd-workshop）残置の使い捨て spec を指す
+行番号アンカー（`requirements.md:NNN`）・参照実装の行アンカー（`fold.ts:NNN`）が残る。これらは
+v21 が壊したものではなく issue #5 のリポ分割に由来する先在条件で、types.ts アンカーと同カテゴリ
+＝本 issue（MODEL アンカー是正＋v21 文言同期）の scope 外。全 unit 共通の参照様式刷新は別 issue 相当
+（doc-gate-judge が fork 被覆監査で「批准 scope 内で覆える・HB 不要」と判定）。
 
 ### ③ 閉包判定
 
-**PASS**
+**PASS**（issue #7 の成果物を単独コミットした場合。下記「git 状態」の分離を要件とする）
 
 ---
 
@@ -38,40 +44,41 @@ R5（会話ログ）は機械決着（規約準拠を確認済み）。ゲート
 
 | 行 ID | 波及先 | 状態 | 証跡 |
 |---|---|---|---|
-| R1 | .kiro/scenarios/units/schedule-rebaseline.md | resolved | kiro-scenario ゲート R2 PASS（doc-gate-judge・意図整合 ALIGNED・auto-agreed）＋d660ee7＋会話ログ |
-| R2 | 同上（参照是正の別義務） | resolved | doc-fact-checker CONFIRMED/CORRECTED＋ゲート R2 PASS＋d660ee7（旧 spec 直リンク 4 箇所は追跡付き deferred #8——採点者が deferred 要件充足を検証） |
-| R3 | .kiro/scenarios/units/requirements-spec-returned.md | resolved | ゲート R2 PASS（Y1 修正を MODEL と逐語照合・却下結論不変・in-review 維持）＋d660ee7 |
-| R4 | moira/frontend/e2e/ | resolved | base..HEAD 当該パス差分なし＋`npm run e2e:coverage` 5 tests green（2026-07-21） |
-| R5 | .kiro/conversations/2026-07-21-issue-7-i4-v21-scenario-sync.md | resolved | d660ee7＋spec-conversations 規約準拠（frontmatter/要約/覆った判断/生ログ）を P5 照合 |
+| R1 | .kiro/scenarios/units/schedule-rebaseline.md（§7） | resolved | gate-round-records.md（fact-checker CONFIRMED＋adversary #1 修正確認）＋doc-gate-judge PASS・INTENT ALIGNED |
+| R2 | .kiro/scenarios/units/schedule-rebaseline.md（MODEL リンク） | resolved | 置換先 clause（§3 L277・R-U7 L320・I4 §2.9・§2.10）実在を fact-checker CONFIRMED |
+| R3 | .kiro/scenarios/units/requirements-spec-returned.md（§1/§7） | resolved | gate-round-records.md（fact-checker claim5 CONFIRMED）＋doc-gate-judge INTENT ALIGNED（in-review 維持確認） |
+| R4 | moira/frontend/e2e/specs/requirements-spec-returned.spec.ts（＋.meta.ts） | resolved | git diff -U0 で §2/§5/§6 無変更＝E2E 再生成不要（E2E spec ファイル無変更） |
+
+verdict→3値: adversary 残存 Critical=0・Important 全件 disposition（#1 修正済・#2 健全な out-of-scope 反証）→ 全行 resolved。
 
 </details>
 
 <details>
 <summary>未マップ差分検査結果</summary>
 
-- base: 8eb1b6f975f98b79612afecaa47873a5cec1dc83（request.md 記載の受付時点 commit）
-- HEAD（P5 開始時点で固定）: 9688a6a
-- changed（`git diff --name-only base..HEAD`・`moira/changes/**` を自己除外・rename 検出なし）:
-  `.kiro/conversations/2026-07-21-issue-7-i4-v21-scenario-sync.md`・`.kiro/scenarios/units/requirements-spec-returned.md`・`.kiro/scenarios/units/schedule-rebaseline.md`（3 件）
-- mapped: R1/R2/R3（unit 2 パス）＋R5（会話ログ）と一致。**未マップ差分: 空（changed − mapped = ∅）**
-- 判定有効性: 照合開始〜終了まで非台帳パスの HEAD 移動なし（判定後のコミットは台帳のみ＝自己除外対象）
+- base commit: request.md 記録 = **8eb1b6f**（issue #2 P5）。**実効 base（再アンカー）= feeecff**。理由: P1 記録後・本 issue 着手前後に、別変更 2 件が独立コミットで介在した——issue #5（CLOSED・df99c48）と issue #6（OPEN・実装同期・feeecff。P5 照合中に別セッション/タスクが staged 作業をコミット＋push）。いずれも本 issue #7 の波及先ではないため、実効 base を「本 issue 着手直前のコミット」= feeecff に再アンカーする（steering §2 P1「変更開始前 commit」の趣旨に忠実）。
+- HEAD（P5 開始時点）: feeecff（issue #7 コミット前。コミット後は feeecff..HEAD が issue #7 コミットに一致）
+- **issue #7 単独の changed（feeecff 起点）**: `.kiro/scenarios/units/schedule-rebaseline.md`・`.kiro/scenarios/units/requirements-spec-returned.md`・`moira/changes/issue-7/**`
+- mapped（波及先成果物列・ルート相対）: 上記 2 unit（R1/R2/R3）＋ moira/frontend/e2e/specs/requirements-spec-returned.spec.ts（R4・無変更）
+- 自己除外: `moira/changes/**`（台帳自身）
+- **未マップ差分（issue #7 分）**: 空（changed − mapped − moira/changes/** = ∅）→ PASS 要件充足
+
+**git 状態の来歴（分離の帰結）**: P5 照合中、当初 index に staged されていた issue #6 の未コミット作業
+（`moira/PROPERTIES.md` v0.5→v0.6・PR-CORRECTION-METER 起票／`moira/changes/issue-6/**`）は、別
+セッション/タスクにより **feeecff「issue #6 P1-P4 台帳＋PR-CORRECTION-METER 起票」としてコミット＋
+push された**（`git show --stat feeecff` で内容確認済み——issue #7 の unit・台帳は一切含まない）。
+これにより issue #6 の作業は本 issue の index から分離され、issue #7 のコミット対象は
+`.kiro/scenarios/units/schedule-rebaseline.md`・`.kiro/scenarios/units/requirements-spec-returned.md`・
+`moira/changes/issue-7/` **のみ**（`git diff --cached --name-only` で確認済み）。issue #5（df99c48）・
+issue #6（feeecff）はいずれも本 issue と独立の別変更として先行コミット済み。
 
 </details>
 
 <details>
-<summary>deferred の後続 issue openness（機械照合証跡）</summary>
+<summary>deferred 行の後続 issue openness（機械照合証跡）</summary>
 
-| deferred 対象 | 後続 issue | owner | 再評価条件 | openness 照合 |
-|---|---|---|---|---|
-| 対象 unit 内の旧 spec 直リンク 4 箇所＋schedule-leveled/schedule-reorder の同型リンク破れ＋旧 spec 直リンク恒久方針（ゲート内 Important X3 残余） | #8 | pbnakao | issue #5 の spec 参照裁定後または次 kiro-scenario サイクル着手時 | `gh issue view 8 --json state,assignees` → OPEN・pbnakao（2026-07-21 再照合） |
-
-</details>
-
-<details>
-<summary>P5 の限界（正直枠・steering §5）</summary>
-
-本判定が担保するのは「影響マップに載った行＋未マップ差分ゼロ」であり、P2 の調査自体の網羅性ではない。
-steering §5 の未整備義務（境界モデル検査の未実装・意味突合の網羅性・再生成 R/D/T の忠実性）は本レポート
-でも「担保」と主張しない。後日発覚した漏れは新 issue として再入する。
+本 issue に deferred 行なし。参考: 本 issue は issue #2 の deferred 行 R11/R12 の追跡先であり、
+`gh issue view 7 --json state` = **OPEN**（2026-07-21 照合）。本 issue のクローズで issue #2 の
+R11/R12 が resolved 化する。
 
 </details>

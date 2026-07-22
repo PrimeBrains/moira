@@ -28,7 +28,13 @@ import { computePv } from './derivations/pv.js';
 import { computeQueues } from './derivations/queues.js';
 import { fold } from './fold.js';
 import { level } from './leveler.js';
-import type { CapacityLookup, DerivedState, Event, IsoDate } from './types.js';
+import type {
+  CapacityLookup,
+  Correction,
+  DerivedState,
+  Event,
+  IsoDate,
+} from './types.js';
 
 export interface DeriveOptions {
   /** Reporting "now" — drives PV(t) and the forecast comparison. Required. */
@@ -40,13 +46,20 @@ export interface DeriveOptions {
    * the log (the project's planned start), else `asOf`.
    */
   startDate?: IsoDate;
+  /**
+   * v21 §2.10: correction layer. Optional. When omitted, `derive` behaves
+   * byte-identically to the pre-v21 read. The composed read of "event log +
+   * corrections" is fed to fold (A2 の射程改訂). The correction meter surfaces
+   * on the returned DerivedState.
+   */
+  corrections?: readonly Correction[];
 }
 
 export function derive(events: readonly Event[], options: DeriveOptions): DerivedState {
   const { asOf } = options;
   const capacityOf = options.capacityOf ?? defaultCapacityLookup;
 
-  const state = fold(events);
+  const state = fold(events, options.corrections ?? []);
   const eff = computeEffectiveSet(state);
 
   const evAbs = computeEvAbs(state, eff);
@@ -104,5 +117,6 @@ export function derive(events: readonly Event[], options: DeriveOptions): Derive
     activityLog,
     effectiveLeaves: eff.effectiveLeaves,
     structuralErrors: state.structuralErrors,
+    correctionMeter: state.correctionMeter,
   };
 }
