@@ -563,3 +563,10 @@ I reviewed the current uncommitted non-Markdown diff, including all correction a
 - drift.ts:89 → `fold(repo.loadEvents(), repo.loadCorrections())` へ配線（#7 完全化）。
 - store.ts → PATCH_VALUE_CHECKS（patch 値の型形状検証: 数値/Actor/children 配列/文字列・id/kind 混入拒否）を assertCorrectionShape へ追加（#9 完全化。値の意味検証は fold の適用不能経路が担う——正典どおり）。
 - 是正後: CLI 344 passed / tsc clean。多プロセスロックと構造無効 3 例の pre-admission 化は **issue #15（OPEN）** へ deferred（owner nakawodayo・再評価条件つき）。
+
+
+## ゲート 3（doc-refine・R15/R16 DECISIONS-CATALOG 状態注記）記録（2026-07-22）
+
+- doc-fact-checker: 7 主張中 6 CONFIRMED・1 精度指摘（「確認プロンプト」→「警告つき確認」——反映済み）。reconcile: MODEL §7#20 の実装状態陳腐化を指摘 → 追補で同期（意味論不変の §7 記述更新・JP/EN）。
+- doc-adversary: Critical 1（F-1: D-1 追記が旧注記の残工程に report を誤帰属）・Important 4（F-2 解消の無限定断定・F-3 丸数字二義・F-4 #15 二重意味〔D-80 規律〕・F-5 ④E2E 陳腐化・F-8 append-only 時系列）・Suggestion 2——全件修正で決着。fork（注記の技術密度）は批准記録の委譲（impact-map R15/R16「文書ゲート内で批准」を HA 承認済み）＋確定済み先行慣行（#6 の 07-21 注記）で本ゲート内決着。
+- doc-gate-judge: **PASS**——残存 Critical/Important 0・INTENT ALIGNED・SOURCE_SET_CONFIRMED・fork 被覆監査 OK・§7#20 追補は意味論不変を確認。D-79 は proposed 維持（agreed 昇格は範囲外）。
