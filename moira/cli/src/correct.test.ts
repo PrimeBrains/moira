@@ -14,7 +14,16 @@
 //   - `moira log` prints each event's id (target discovery, no --json needed)
 //   - report reflection: correctionMeter goes non-zero after a correct
 
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -135,6 +144,101 @@ describe('MoiraRepo corrections.json (append-only third tier — issue #11 R7)',
     const files = readdirSync(join(tmp, '.moira'));
     expect(files).toContain('corrections.json');
     expect(files.some((f) => f.includes('.tmp-'))).toBe(false);
+  });
+
+  // issue #15 R3/R4: corrections.json's advisory lock. appendCorrections'
+  // load→append→write critical section is guarded by an exclusive-create
+  // (`wx`) lockfile (`corrections.json.lock`) so two concurrent writers can
+  // never both load the same prior contents and have the later save silently
+  // discard the earlier writer's append (lost update) — see store.ts's
+  // appendCorrections doc comment for the lock/atomic-rename role split.
+  describe('advisory lock (issue #15 R3/R4)', () => {
+    it('two MoiraRepo instances alternating appends on the same repo both survive, and no lockfile is left behind', () => {
+      // Not true multiprocess (Node is single-threaded here), but this is a
+      // real witness of the mechanism the task calls out as sufficient when
+      // true multiprocess is impractical: TWO INDEPENDENT MoiraRepo instances
+      // pointed at the SAME .moira dir, alternating appends — each call must
+      // acquire, use, and cleanly release the lock so the NEXT instance's
+      // call is never blocked by a leftover lock, and BOTH records must
+      // survive in the final file (no lost update across instances).
+      const repoA = new MoiraRepo(tmp);
+      repoA.init({ projectRoot: 'p', me: 'me' });
+      const repoB = new MoiraRepo(tmp);
+      repoA.appendCorrections([
+        { id: 'c1', ts: 1, actor: { kind: 'human', id: 'me' }, targetEventId: 'e1', reason: 'r1', correctionKind: 'nullify' },
+      ]);
+      repoB.appendCorrections([
+        { id: 'c2', ts: 2, actor: { kind: 'human', id: 'me' }, targetEventId: 'e2', reason: 'r2', correctionKind: 'nullify' },
+      ]);
+      repoA.appendCorrections([
+        { id: 'c3', ts: 3, actor: { kind: 'human', id: 'me' }, targetEventId: 'e3', reason: 'r3', correctionKind: 'nullify' },
+      ]);
+      expect(repoB.loadCorrections().map((c) => c.id)).toEqual(['c1', 'c2', 'c3']);
+      const files = readdirSync(join(tmp, '.moira'));
+      expect(files.some((f) => f.endsWith('.lock'))).toBe(false); // no leftover lock
+      expect(files.some((f) => f.includes('.tmp-'))).toBe(false); // no leftover temp file either
+    });
+
+    it('a lock held by a LIVE pid blocks a writer through the retry budget, then throws CliError — no partial/lost write', () => {
+      const repo = new MoiraRepo(tmp);
+      repo.init({ projectRoot: 'p', me: 'me' });
+      const lockPath = `${repo.correctionsPath}.lock`;
+      // Our own test process — guaranteed alive — holds the lock, freshly
+      // timestamped (so neither the pid-liveness nor the mtime staleness
+      // trigger clears it).
+      writeFileSync(lockPath, JSON.stringify({ pid: process.pid, ts: Date.now() }), 'utf8');
+      const t0 = Date.now();
+      expect(() =>
+        repo.appendCorrections([
+          { id: 'c1', ts: 1, actor: { kind: 'human', id: 'me' }, targetEventId: 'e1', reason: 'r', correctionKind: 'nullify' },
+        ]),
+      ).toThrow(CliError);
+      const elapsedMs = Date.now() - t0;
+      // Proves it actually RETRIED with backoff rather than failing instantly
+      // (an immediate single-attempt failure would be well under 10ms).
+      expect(elapsedMs).toBeGreaterThan(50);
+      // No lost/partial write — corrections.json is untouched (still the
+      // init-seeded empty array), and the (still-live) lock is left in place
+      // (this call never acquired it, so it must not delete someone else's
+      // lock on its way out).
+      expect(repo.loadCorrections()).toEqual([]);
+      expect(existsSync(lockPath)).toBe(true);
+    });
+
+    it('a lock held by a DEAD pid is treated as stale and taken over — the append still succeeds', () => {
+      const repo = new MoiraRepo(tmp);
+      repo.init({ projectRoot: 'p', me: 'me' });
+      const lockPath = `${repo.correctionsPath}.lock`;
+      // A pid guaranteed dead by the time we read it: spawnSync blocks until
+      // the child has already exited, so its pid is free for staleness
+      // detection to identify via ESRCH.
+      const dead = spawnSync(process.execPath, ['-e', '0']);
+      const deadPid = dead.pid;
+      expect(typeof deadPid).toBe('number');
+      writeFileSync(lockPath, JSON.stringify({ pid: deadPid, ts: Date.now() }), 'utf8');
+      expect(() =>
+        repo.appendCorrections([
+          { id: 'c1', ts: 1, actor: { kind: 'human', id: 'me' }, targetEventId: 'e1', reason: 'r', correctionKind: 'nullify' },
+        ]),
+      ).not.toThrow();
+      expect(repo.loadCorrections().map((c) => c.id)).toEqual(['c1']);
+      expect(existsSync(lockPath)).toBe(false); // released after the (stolen-then-used) critical section
+    });
+
+    it('a stale-by-AGE lock (old mtime, even with a live pid) is also taken over', () => {
+      const repo = new MoiraRepo(tmp);
+      repo.init({ projectRoot: 'p', me: 'me' });
+      const lockPath = `${repo.correctionsPath}.lock`;
+      writeFileSync(lockPath, JSON.stringify({ pid: process.pid, ts: Date.now() }), 'utf8');
+      const old = new Date(Date.now() - 60_000); // well past the staleness threshold
+      utimesSync(lockPath, old, old);
+      expect(() =>
+        repo.appendCorrections([
+          { id: 'c1', ts: 1, actor: { kind: 'human', id: 'me' }, targetEventId: 'e1', reason: 'r', correctionKind: 'nullify' },
+        ]),
+      ).not.toThrow();
+      expect(repo.loadCorrections().map((c) => c.id)).toEqual(['c1']);
+    });
   });
 });
 

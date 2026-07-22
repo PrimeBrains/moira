@@ -26,7 +26,15 @@
 //   config.json   projectRoot / me / default asOf / orgCalendar.enabled (#32)
 // Uses the engine's EventStore/CapacityStore for load+save (deterministic order).
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { CapacityStore, EventStore } from 'moira-backend';
 import type { CapacityEntry, Correction, Event, MilestoneDefinition, NodeId } from 'moira-backend';
@@ -144,6 +152,80 @@ export function resolveMilestones(entries: readonly MilestoneEntry[]): Milestone
     defs.push({ name: e.milestone, nodes: e.nodes });
   }
   return defs.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+}
+
+// ---------------------------------------------------------------------------
+// corrections.json advisory lock (issue #15) — see appendCorrections's own
+// doc comment for the lock/rename role split. No new runtime dependency: a
+// self-contained fs advisory lock via exclusive file creation (`wx`), same
+// tradition as Node's other zero-dependency lockfile idioms.
+// ---------------------------------------------------------------------------
+
+// Bounded — "no silent hang" (moira-verification discipline): a lock that
+// never clears must surface as a loud CliError, not an infinite/near-infinite
+// spin. 15 attempts × 15ms ≈ 225ms worst case — modest, per the task mandate.
+const LOCK_MAX_ATTEMPTS = 15;
+const LOCK_RETRY_DELAY_MS = 15;
+// A held lock older than this is presumed abandoned (its holder crashed
+// without reaching the `finally` unlink) EVEN IF the pid happens to still
+// resolve to a live (but unrelated/reused) process — mtime is the fallback
+// trigger, `process.kill(pid, 0)` liveness is the primary one (see
+// isLockStale below; either alone is sufficient to steal).
+const LOCK_STALE_MS = 30_000;
+
+interface LockFileContents {
+  pid: number;
+  ts: number;
+}
+
+/** Synchronous sleep — Node's main thread supports `Atomics.wait` (unlike a
+ * browser main thread), so a short bounded backoff needs no new dependency
+ * and no callback/async threading through otherwise-synchronous store.ts
+ * methods. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** Is `pid` a live process? `process.kill(pid, 0)` sends no signal — it only
+ * probes existence/permission. ESRCH = no such process (dead — the ONLY
+ * case treated as "not alive" here); any other outcome (success, or EPERM —
+ * exists but owned by another user) is conservatively treated as alive, so a
+ * live-but-unsignalable holder is never mistaken for stale. */
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    return code !== 'ESRCH';
+  }
+}
+
+/** Stale iff the recorded holder pid is dead, OR the lock file is older than
+ * `LOCK_STALE_MS` — either alone is sufficient (see LOCK_STALE_MS comment).
+ * A lock file that has disappeared or is unreadable/malformed by the time we
+ * look is treated as "not provably stale, not provably live" → false; the
+ * caller's own retry loop naturally re-contends the exclusive create next. */
+function isLockStale(lockPath: string): boolean {
+  let raw: string;
+  try {
+    raw = readFileSync(lockPath, 'utf8');
+  } catch {
+    return false;
+  }
+  let holderPid: number | undefined;
+  try {
+    const parsed = JSON.parse(raw) as Partial<LockFileContents>;
+    if (typeof parsed.pid === 'number') holderPid = parsed.pid;
+  } catch {
+    // malformed content — fall through to the mtime check alone
+  }
+  if (holderPid !== undefined && !isProcessAlive(holderPid)) return true;
+  try {
+    return Date.now() - statSync(lockPath).mtimeMs > LOCK_STALE_MS;
+  } catch {
+    return false;
+  }
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -292,10 +374,28 @@ export class MoiraRepo {
   // deep inside fold/derive with an opaque TypeError, or silently feeding
   // garbage into the correction layer) — NOT full §2.10 applicability
   // validation, which stays fold's job (a foreign patch key is a visible
-  // structural error at fold-time, not rejected here). appendCorrections
-  // writes via temp-file → rename (atomic replace) so an interrupted write
-  // can never truncate the existing history — the previous direct
-  // writeFileSync could leave a torn/partial JSON file on interruption.
+  // structural error at fold-time, not rejected here).
+  //
+  // appendCorrections' critical section (load → append → write) is guarded
+  // by TWO independent, complementary mechanisms with distinct jobs (issue
+  // #15):
+  //   - the advisory LOCK (`<correctionsPath>.lock`, acquireCorrectionsLock/
+  //     releaseCorrectionsLock below) guards against LOST UPDATES — two
+  //     concurrent writers each doing their own "load all → append → save
+  //     all" would otherwise each load the SAME prior contents and the
+  //     later save wins outright, silently discarding the earlier writer's
+  //     append. The lock serializes the whole load→append→write section
+  //     across writers.
+  //   - the temp-file → rename (atomic replace, unchanged from before issue
+  //     #15) guards against TORN WRITES — even a SOLE writer's own save can
+  //     be interrupted mid-write (crash, kill -9); writing to a fresh temp
+  //     path and renaming over the real path means the real path is only
+  //     ever seen as fully-old or fully-new, never a partial/truncated JSON
+  //     file.
+  // Neither alone is sufficient: the lock says nothing about a torn write
+  // from a single interrupted writer; the atomic rename says nothing about
+  // two writers each innocently computing a `[...old, ...new]` from a
+  // now-stale `old`.
   loadCorrections(): Correction[] {
     if (!existsSync(this.correctionsPath)) return [];
     let parsed: unknown;
@@ -312,11 +412,90 @@ export class MoiraRepo {
     parsed.forEach((c, i) => assertCorrectionShape(c, i));
     return parsed as Correction[];
   }
+
+  private get correctionsLockPath(): string {
+    return `${this.correctionsPath}.lock`;
+  }
+
+  /**
+   * Acquire the corrections.json advisory lock (issue #15). Exclusive create
+   * (`wx`) is the actual mutual-exclusion primitive — two processes racing
+   * to create the same path can never both succeed. On contention (EEXIST):
+   * check whether the CURRENT holder looks abandoned (`isLockStale`) and, if
+   * so, steal it (unlink) so the NEXT attempt's exclusive create can win;
+   * either way, back off briefly and retry, bounded by LOCK_MAX_ATTEMPTS —
+   * exhausting the budget is a loud CliError, never a silent pass-through
+   * (a caller that ignored the lock would reintroduce the exact lost-update
+   * this exists to prevent).
+   */
+  private acquireCorrectionsLock(): void {
+    const lockPath = this.correctionsLockPath;
+    for (let attempt = 1; attempt <= LOCK_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        const contents: LockFileContents = { pid: process.pid, ts: Date.now() };
+        writeFileSync(lockPath, JSON.stringify(contents), { flag: 'wx' });
+        return; // acquired
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e; // unexpected fs error — surface as-is
+        if (isLockStale(lockPath)) {
+          try {
+            unlinkSync(lockPath); // best-effort steal; a concurrent stealer racing us just re-contends below
+          } catch {
+            // already gone (another process stole/released it first) — fine
+          }
+        }
+        if (attempt === LOCK_MAX_ATTEMPTS) {
+          throw new CliError(
+            `corrections.json の書き込みロックを取得できませんでした（他のプロセスが処理中の可能性があります: ${lockPath}）`,
+          );
+        }
+        sleepSync(LOCK_RETRY_DELAY_MS);
+      }
+    }
+  }
+
+  /**
+   * Unlink the lock ONLY if it is still stamped with OUR pid. A plain
+   * unconditional unlink would be wrong: if THIS holder stalled past
+   * LOCK_STALE_MS mid-critical-section, another writer may have already
+   * judged the lock stale, stolen it (unlink + recreate under ITS OWN pid),
+   * and be in ITS OWN critical section right now — an unconditional unlink
+   * here would delete THAT LIVE lock out from under it (re-opening exactly
+   * the lost-update window this mechanism exists to close), not a harmless
+   * no-op on an already-gone file. Re-reading and pid-matching before
+   * unlinking closes that cross-delete, though the read-then-unlink pair is
+   * itself not atomic (a classic advisory-lock TOCTOU) — an extremely
+   * narrow residual race remains if a steal lands in that exact window; this
+   * is a best-effort mutual-exclusion guard, not a linearizable lock.
+   */
+  private releaseCorrectionsLock(): void {
+    let owned = false;
+    try {
+      const parsed = JSON.parse(readFileSync(this.correctionsLockPath, 'utf8')) as
+        Partial<LockFileContents>;
+      owned = parsed.pid === process.pid;
+    } catch {
+      return; // gone or unreadable — nothing of ours left to release
+    }
+    if (!owned) return; // stolen by (and now owned by) another writer — not ours to delete
+    try {
+      unlinkSync(this.correctionsLockPath);
+    } catch {
+      // already gone (e.g. raced with a steal between our read and unlink
+      // above — the residual TOCTOU noted in the doc comment) — no-op
+    }
+  }
+
   appendCorrections(recs: readonly Correction[]): void {
-    const all = [...this.loadCorrections(), ...recs];
-    const tmp = `${this.correctionsPath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    writeFileSync(tmp, `${JSON.stringify(all, null, 2)}\n`, 'utf8');
-    renameSync(tmp, this.correctionsPath); // atomic replace — no torn/partial write on interruption
+    this.acquireCorrectionsLock();
+    try {
+      const all = [...this.loadCorrections(), ...recs];
+      const tmp = `${this.correctionsPath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      writeFileSync(tmp, `${JSON.stringify(all, null, 2)}\n`, 'utf8');
+      renameSync(tmp, this.correctionsPath); // atomic replace — no torn/partial write on interruption
+    } finally {
+      this.releaseCorrectionsLock();
+    }
   }
 
   // --- capacity ---

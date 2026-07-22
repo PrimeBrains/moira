@@ -1000,3 +1000,235 @@ describe('§2.8 (v21) release sentinel — assignee/reviewer explicit un-assignm
     expect(state.nodes.get('A')?.reviewer).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// issue #15: pre-admission (trial-fold) for the three remaining §2.10 (i)
+// "検証の迂回は不能" worked examples — a containment-cycle decompose patch, a
+// negative-amount cost patch, and a cycle-creating relate-endpoint patch. The
+// fourth example (non-human actor onto an agreed estimate-transition) was
+// already pre-admission-checked by issue #11 gate-2 R2 #2 (see the (j) block
+// above); these three used to flow into `winnerByTarget` and rely on the base
+// switch's OWN rejection at fold-time, which — unlike this pre-admission gate
+// — does NOT keep the prior valid reading in force (it just drops the target
+// into a rejected-by-base-switch state, same shape as an ordinary bad EVENT,
+// with `inapplicable` left at 0). issue #15 closes that gap: each candidate
+// is now run through a TRIAL fold (would-be-apply against the real base
+// switch) before it is ever set as a target's winner, and rejected —
+// pre-admission, `inapplicable` incremented, prior valid reading preserved —
+// if doing so introduces a NEW structural error anywhere in the log.
+// ---------------------------------------------------------------------------
+
+describe('§2.10 issue #15 ① decompose value-correction that would move a parent onto its own descendant (containment cycle)', () => {
+  it('a patch that moves the effective parent into the child’s own subtree is inapplicable; the original decompose stays in force', () => {
+    // Chain established by the RAW log: A → B → C (t001, t002).
+    const events: Event[] = new Log()
+      .decompose('A', [{ node: 'B', estimate: 3 }]) // t001
+      .decompose('B', [{ node: 'C', estimate: 2 }]) // t002
+      .all();
+    // c1 claims t001 should really have read "decompose('C', [B])" — i.e. B's
+    // effective parent should be C. But C is B's OWN CHILD (via t002) — this
+    // is exactly the containment-cycle shape §2.10 (i) names by worked
+    // example. The cycle only becomes visible once the REAL base switch
+    // re-applies t002 against the corrected t001 (t002 tries to set C's
+    // parent to B, and B's parent is now C — A3/§2.8 tree-ness guard trips)
+    // — a naive "does the target event itself cycle" check would MISS this;
+    // only a full trial fold catches it.
+    const corrections: Correction[] = [
+      {
+        id: 'c1',
+        ts: 1000,
+        actor: human('h1'),
+        targetEventId: 't001',
+        reason: 'value correction — the parent was actually C, not A',
+        correctionKind: 'patch',
+        patch: { parent: 'C' },
+      },
+    ];
+    const state = fold(events, corrections);
+    // (i) prior valid reading (here: no preceding correction, so the
+    // ORIGINAL event) stays in force — B's parent is still A, untouched.
+    expect(state.nodes.get('B')?.parent).toBe('A');
+    expect(state.nodes.get('C')?.parent).toBe('B');
+    // (ii) meter
+    expect(state.correctionMeter.total).toBe(1);
+    expect(state.correctionMeter.inapplicable).toBe(1);
+    // (iii) the surfaced error is the §2.10-wrapped inapplicable text, citing
+    // the underlying containment-cycle reason — NOT a bare base-switch error.
+    expect(
+      state.structuralErrors.some((e) => e.includes('§2.10') && e.includes('containment cycle')),
+    ).toBe(true);
+    expect(state.structuralErrors.some((e) => e.startsWith('A3/§2.8'))).toBe(false);
+  });
+
+  it('a preceding VALID correction on the same target stays the effective winner when a later one is a cycle-inducing patch', () => {
+    // (iv) same-target chain: c1 (valid) wins latest-wins first; c2 (later,
+    // cycle-inducing) must be rejected WITHOUT dropping c1's effect.
+    const events: Event[] = new Log()
+      .decompose('A', [{ node: 'B', estimate: 3 }]) // t001
+      .decompose('B', [{ node: 'C', estimate: 2 }]) // t002
+      .all();
+    const corrections: Correction[] = [
+      {
+        id: 'c1',
+        ts: 100,
+        actor: human('h1'),
+        targetEventId: 't001',
+        reason: 'valid re-label — the parent was actually Z, an unrelated node',
+        correctionKind: 'patch',
+        patch: { parent: 'Z' },
+      },
+      {
+        id: 'c2',
+        ts: 200,
+        actor: human('h1'),
+        targetEventId: 't001',
+        reason: 'later, wrong correction attempting to move the parent to C',
+        correctionKind: 'patch',
+        patch: { parent: 'C' },
+      },
+    ];
+    const state = fold(events, corrections);
+    // c1's effect (parent=Z) stays in force — NOT the original 'A', and NOT
+    // c2's cycle-inducing 'C'.
+    expect(state.nodes.get('B')?.parent).toBe('Z');
+    expect(state.correctionMeter.total).toBe(2);
+    expect(state.correctionMeter.inapplicable).toBe(1); // only c2
+  });
+
+  it('(v) all-or-nothing per record: one bad child among several inapplicates the WHOLE decompose correction', () => {
+    // A has an ancestor 'Root' (t001). t002 decomposes A into [B]. c1 patches
+    // t002's children to [Z (harmless new node), Root (A's own ancestor —
+    // making Root a child of A closes a cycle)]. Even though Z alone would
+    // have applied cleanly, the record must be rejected WHOLESALE — Z must
+    // never be created either.
+    const events: Event[] = new Log()
+      .decompose('Root', [{ node: 'A', estimate: 10 }]) // t001
+      .decompose('A', [{ node: 'B', estimate: 3 }]) // t002
+      .all();
+    const corrections: Correction[] = [
+      {
+        id: 'c1',
+        ts: 1000,
+        actor: human('h1'),
+        targetEventId: 't002',
+        reason: 'value correction — A actually decomposed into Z and (mistakenly) Root',
+        correctionKind: 'patch',
+        patch: {
+          children: [
+            { node: 'Z', estimate: 5 },
+            { node: 'Root', estimate: 1 },
+          ],
+        },
+      },
+    ];
+    const state = fold(events, corrections);
+    // The original t002 (A → [B]) stays in force — record rejected wholesale.
+    expect(state.nodes.get('B')?.parent).toBe('A');
+    // Z — the individually-harmless child in the SAME rejected record — was
+    // never created either (all-or-nothing, not per-child).
+    expect(state.nodes.has('Z')).toBe(false);
+    expect(state.correctionMeter.total).toBe(1);
+    expect(state.correctionMeter.inapplicable).toBe(1);
+  });
+});
+
+describe('§2.10 issue #15 ② cost value-correction that would set a negative amount', () => {
+  it('a patch driving `amount` negative is inapplicable; the original cost stays in force', () => {
+    const events: Event[] = new Log()
+      .decompose('F', [{ node: 'A', estimate: 3 }]) // t001
+      .cost('A', 5) // t002
+      .all();
+    const corrections: Correction[] = [
+      {
+        id: 'c1',
+        ts: 1000,
+        actor: human('h1'),
+        targetEventId: 't002',
+        reason: 'value correction — actually the amount was -5 (mistaken sign)',
+        correctionKind: 'patch',
+        patch: { amount: -5 },
+      },
+    ];
+    const state = fold(events, corrections);
+    // (i) original cost (5) stays in force — not dropped, not -5.
+    expect(state.nodes.get('A')?.ownCost).toBe(5);
+    // (ii) meter
+    expect(state.correctionMeter.total).toBe(1);
+    expect(state.correctionMeter.inapplicable).toBe(1);
+    // (iii) wrapped §2.10 text, not the bare base-switch error.
+    expect(
+      state.structuralErrors.some((e) => e.includes('§2.10') && e.includes('negative cost')),
+    ).toBe(true);
+    expect(state.structuralErrors.some((e) => e.startsWith('A6/§2.8'))).toBe(false);
+  });
+
+  it('a patch fixing a raw negative amount back to a legal one is still admitted (boundary check)', () => {
+    // Positive witness — the trial-fold gate must not over-tighten: FIXING a
+    // pre-existing structural error (here, a raw negative-amount cost event
+    // already in the log) is exactly what §2.10 corrections are FOR, and
+    // must still be admitted.
+    const events: Event[] = [
+      ...new Log().decompose('F', [{ node: 'A', estimate: 3 }]).all(), // t001
+      { kind: 'cost', id: 't002', ts: 2, actor: human('h1'), node: 'A', amount: -5 },
+    ];
+    // Sanity: the raw log (no corrections) does trip the negative-cost guard.
+    const uncorrected = fold(events);
+    expect(uncorrected.nodes.get('A')?.ownCost).toBe(0);
+    expect(uncorrected.structuralErrors.some((e) => e.startsWith('A6/§2.8'))).toBe(true);
+
+    const corrections: Correction[] = [
+      {
+        id: 'c1',
+        ts: 1000,
+        actor: human('h1'),
+        targetEventId: 't002',
+        reason: 'transcription error — the amount was actually 5, positive',
+        correctionKind: 'patch',
+        patch: { amount: 5 },
+      },
+    ];
+    const state = fold(events, corrections);
+    expect(state.nodes.get('A')?.ownCost).toBe(5); // the fix is admitted
+    expect(state.correctionMeter.inapplicable).toBe(0);
+    expect(state.structuralErrors.some((e) => e.startsWith('A6/§2.8'))).toBe(false);
+  });
+});
+
+describe('§2.10 issue #15 ③ relate endpoint-correction that would create a cycle', () => {
+  it('a patch redirecting an endpoint to close a cycle is inapplicable; the original edge stays in force', () => {
+    const events: Event[] = new Log()
+      .decompose('F', [{ node: 'A' }, { node: 'B' }, { node: 'C' }]) // t001
+      .dep('A', 'B') // t002: A→B
+      .dep('B', 'C') // t003: B→C
+      .all();
+    // c1 claims t003 should really read dep('B','A') — combined with the
+    // (unmodified) A→B edge from t002, that closes a 2-cycle A→B→A.
+    const corrections: Correction[] = [
+      {
+        id: 'c1',
+        ts: 1000,
+        actor: human('h1'),
+        targetEventId: 't003',
+        reason: 'value correction — the successor was actually A, not C',
+        correctionKind: 'patch',
+        patch: { to: 'A' },
+      },
+    ];
+    const state = fold(events, corrections);
+    // (i) original edge (B→C) stays in force.
+    expect(state.dependencyEdges).toContainEqual(
+      expect.objectContaining({ from: 'B', to: 'C' }),
+    );
+    expect(state.dependencyEdges).not.toContainEqual(
+      expect.objectContaining({ from: 'B', to: 'A' }),
+    );
+    // (ii) meter
+    expect(state.correctionMeter.total).toBe(1);
+    expect(state.correctionMeter.inapplicable).toBe(1);
+    // (iii) wrapped §2.10 text, not the bare base-switch error.
+    expect(state.structuralErrors.some((e) => e.includes('§2.10') && e.includes('cyclic'))).toBe(
+      true,
+    );
+    expect(state.structuralErrors.some((e) => e.startsWith('I2/R-D3'))).toBe(false);
+  });
+});
