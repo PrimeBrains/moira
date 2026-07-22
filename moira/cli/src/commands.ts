@@ -8,7 +8,15 @@ import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import ExcelJS from 'exceljs';
 import { CapacityStore, derive, fold, orgCalendarFallback } from 'moira-backend';
-import type { Actor, DeriveOptions, Event, LifecycleState } from 'moira-backend';
+import type {
+  Actor,
+  Correction,
+  DeriveOptions,
+  Event,
+  EventPatch,
+  LifecycleState,
+  ProjectedState,
+} from 'moira-backend';
 import { parseActor } from './actors.js';
 import { writeWbsTemplate } from './xlsx/wbs-template.js';
 import { parseWbsSheet, planWbsEvents, validateWbs } from './xlsx/wbs-import.js';
@@ -118,6 +126,20 @@ function meActor(cfg: MoiraConfig): Actor {
   return parseActor(cfg.me); // a plain dev id → human (estimate-agreement requires human)
 }
 
+/**
+ * Corrections-aware fold (issue #11 #7 — A2 改訂「導出はイベントログ＋訂正層の
+ * 合成読み」). Every existing read/write-guard call site that used to fold the
+ * bare event log now goes through this helper instead, so a
+ * correction lands consistently everywhere (cmdShow/lifecycle/assign/cost's
+ * pre-checks/tree resolution/etc.) — not just `moira report`/`moira correct`'s
+ * own lock check, which were the only two call sites reading corrections.json
+ * before this fix (split-brain: a correction visibly changed `report` while
+ * every other command kept reading the uncorrected log).
+ */
+function foldRepo(repo: MoiraRepo): ProjectedState {
+  return fold(repo.loadEvents(), repo.loadCorrections());
+}
+
 function buildDeriveOptions(repo: MoiraRepo, asOf?: string, startDate?: string): DeriveOptions {
   const cfg = repo.loadConfig();
   const opts: DeriveOptions = { asOf: asOf ?? cfg.asOf ?? today() };
@@ -134,6 +156,13 @@ function buildDeriveOptions(repo: MoiraRepo, asOf?: string, startDate?: string):
   // meant "no capacity data at all" silently disabled the org calendar too).
   const fallback = cfg.orgCalendar?.enabled !== false ? orgCalendarFallback({ warn: err }) : undefined;
   opts.capacityOf = store.lookup(fallback);
+  // issue #11 #7: derive() reads the SAME composite (events + corrections)
+  // read as fold() — buildDeriveOptions is `derive`'s ONE construction site
+  // (cmdShow/cmdReport), so wiring it here covers both without duplicating
+  // the repo.loadCorrections() call at each caller. cmdReport doesn't spread
+  // this field (it sets `corrections` explicitly on ReportOptions itself), so
+  // adding it here is additive-only for that caller.
+  opts.corrections = repo.loadCorrections();
   return opts;
 }
 
@@ -189,7 +218,7 @@ function cmdAdd(rest: string[]): void {
   // (with a visible note either way — issue #5's silent root fallback minted
   // a second decompose edge and a doubled tree).
   const { parent, note } = resolveAddParent(
-    fold(repo.loadEvents()),
+    foldRepo(repo),
     node,
     str(values.parent),
     cfg.projectRoot,
@@ -252,7 +281,7 @@ function cmdAssign(rest: string[]): void {
   // `to` defaults to 'ready' — an assign on a cancelled node would otherwise
   // silently pull it back OUT of its terminal state, the exact same hole
   // cmdLifecycle closes below for start/done/accept/cancel.
-  const before = fold(repo.loadEvents()).nodes.get(node);
+  const before = foldRepo(repo).nodes.get(node);
   if (before?.lifecycle === 'cancelled') {
     throw new CliError(
       `${node} は cancelled（終端）— assign は拒否されます（§2.5）。誤 cancel の場合は新規ノードとして再作成する（正典の回復路）`,
@@ -314,7 +343,7 @@ async function cmdLifecycle(rest: string[], to: LifecycleState, verb: string): P
   // enforces "no re-transition FROM cancelled". Forward-skips (ready→implemented,
   // §7#13(b)) and honest backward moves (implemented→implementing, P5) are NOT
   // touched — only cancelled's terminal edge is closed.
-  const current = fold(repo.loadEvents()).nodes.get(node)?.lifecycle;
+  const current = foldRepo(repo).nodes.get(node)?.lifecycle;
   if (current === 'cancelled') {
     throw new CliError(
       `${node} は cancelled（終端）— これ以上の遷移は拒否されます（§2.5）。誤 cancel の場合は新規ノードとして再作成する（正典の回復路）`,
@@ -366,7 +395,7 @@ function cmdCost(rest: string[]): void {
   // ghost node (fold.ts's `ensure()` auto-creates any id it sees) and book
   // cost onto it with no visible signal. Require the id to already be known to
   // the log (via `moira add`/decompose) before crediting cost to it.
-  const state = fold(repo.loadEvents());
+  const state = foldRepo(repo);
   if (!state.nodes.has(node)) {
     throw new CliError(
       `unknown node: "${node}" はイベントログに現れません（幽霊ノードへの計上を防止 — 先に moira add で作成するか、ID の打ち間違いを確認）`,
@@ -405,7 +434,7 @@ function cmdRelate(rest: string[]): void {
   // Reject a would-be exact duplicate up front — `--remove` first is the way
   // to change an edge's policy, matching item 6(b)'s policy-scoped remove.
   if (op === 'add') {
-    const state = fold(repo.loadEvents());
+    const state = foldRepo(repo);
     const existing =
       edgeKind === 'supersede'
         ? state.supersedeEdges.some((e) => e.from === from && e.to === to)
@@ -419,6 +448,230 @@ function cmdRelate(rest: string[]): void {
   const ev = relateEvent(realStamper()(), meActor(cfg), op, from, to, edgeKind, policy);
   repo.appendEvents([ev]);
   out(`⇄ ${op} ${edgeKind} ${from} → ${to}`);
+}
+
+// --- correction (v21/v22 §2.10 third tier) ---------------------------------
+//
+// Universal correction principle (issue #33; MODEL §2.10): every first-tier
+// event is correctable, but (a) append-only (b) reason required (c) names the
+// target event id. Two COMPLETE forms — --patch (値訂正: the named fields'
+// true values, all together) and --nullify (誤記表明: the whole target event
+// never should have been issued) — are mutually exclusive; no partial/mixed
+// correction exists (§2.10 (i)/(ii)).
+//
+// Only `id`/`kind` are identity and stay rejected — MODEL §2.10 (i) names
+// "amount・node・ts・actor・凍結値等" as the worked examples of what a --patch
+// MAY target, and `actor` is explicitly in that list (issue #11 #8: a prior
+// version of this file also rejected `actor`, contrary to canon — fixed here).
+const PATCH_REJECTED_KEYS = new Set(['id', 'kind']);
+
+type PatchValue = string | number | boolean | null | Actor | Array<{ node: string; estimate?: number }>;
+
+/**
+ * Per-key type conversion (issue #11 #8) — this CLI layer only CONVERTS, it
+ * never validates applicability (fold's mergePatch, backend, is the
+ * authority on which keys belong to the target event's kind — a foreign key
+ * surfaces later as a visible structural error, §2.10). Conversion table:
+ *   - `amount` / `frozenBudget` → number (finite; rejected otherwise).
+ *   - `ts` → epoch ms: accepts a bare YYYY-MM-DD (converted to UTC midnight,
+ *     same convention as WBS import's actual-date anchoring,
+ *     xlsx/wbs-import.ts) OR a raw numeric epoch-ms literal.
+ *   - `assignee` / `reviewer` → an Actor object via `human:<id>`/`agent:<id>`
+ *     (actors.ts's parseActor, the SAME format `moira assign --to/--reviewer`
+ *     already accepts), OR the literal string `null` → the v21 §2.8 release
+ *     sentinel (explicit un-assignment/un-review — distinct from "not
+ *     mentioned", which is what OMITTING the key from --patch already means).
+ *   - `actor` → an Actor object via parseActor (never `null` — actor is
+ *     never sentinel-nullable, unlike assignee/reviewer).
+ *   - `children` → a JSON array of `{node, estimate?}` (decompose's shape;
+ *     JSON is the only reasonable k=v encoding for a structured list).
+ *   - every other key: `true`/`false` → boolean (harmless fallback — no
+ *     current event field is boolean-typed, but a k=v value that spells a
+ *     boolean literal should not silently stay the STRING "true"); anything
+ *     else stays a plain string.
+ */
+function parsePatchValue(key: string, raw: string): PatchValue {
+  if (key === 'amount' || key === 'frozenBudget') {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) throw new CliError(`--patch ${key}=${raw} は有効な数値ではありません`);
+    return n;
+  }
+  if (key === 'ts') {
+    if (isIsoDate(raw)) return Date.parse(`${raw}T00:00:00Z`);
+    const n = Number(raw);
+    if (!Number.isFinite(n)) {
+      throw new CliError(`--patch ts=${raw} は epoch ms（数値）または YYYY-MM-DD で指定する`);
+    }
+    return n;
+  }
+  if (key === 'assignee' || key === 'reviewer') {
+    if (raw === 'null') return null; // v21 §2.8 release sentinel
+    return parseActor(raw);
+  }
+  if (key === 'actor') {
+    return parseActor(raw);
+  }
+  if (key === 'children') {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new CliError(
+        `--patch children=${raw} は JSON 配列で指定する（例: '[{"node":"a","estimate":2}]'）`,
+      );
+    }
+    const valid =
+      Array.isArray(parsed) &&
+      parsed.every(
+        (c) =>
+          typeof c === 'object' &&
+          c !== null &&
+          typeof (c as { node?: unknown }).node === 'string' &&
+          ((c as { estimate?: unknown }).estimate === undefined ||
+            typeof (c as { estimate?: unknown }).estimate === 'number'),
+      );
+    if (!valid) {
+      throw new CliError(`--patch children=${raw} は {node: string, estimate?: number} の配列で指定する`);
+    }
+    return parsed as Array<{ node: string; estimate?: number }>;
+  }
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  return raw;
+}
+
+function parsePatchArgs(specs: readonly string[]): Record<string, PatchValue> {
+  const patch: Record<string, PatchValue> = {};
+  for (const spec of specs) {
+    const eq = spec.indexOf('=');
+    if (eq < 0) throw new CliError(`--patch は k=v 形式で指定する: "${spec}"`);
+    const key = spec.slice(0, eq);
+    const raw = spec.slice(eq + 1);
+    if (PATCH_REJECTED_KEYS.has(key)) {
+      throw new CliError(
+        `--patch ${key}=... は拒否されます — id/kind は識別子で訂正対象外（§2.10 EventPatch）`,
+      );
+    }
+    patch[key] = parsePatchValue(key, raw);
+  }
+  if (Object.keys(patch).length === 0) {
+    throw new CliError('--patch には少なくとも1つの k=v を指定する');
+  }
+  return patch;
+}
+
+async function cmdCorrect(rest: string[]): Promise<void> {
+  const parsed = parseArgs({
+    args: rest,
+    options: {
+      reason: { type: 'string' },
+      patch: { type: 'string', multiple: true },
+      nullify: { type: 'boolean' },
+      yes: { type: 'boolean', short: 'y' },
+    },
+    allowPositionals: true,
+  });
+  const values = parsed.values as {
+    reason?: string;
+    patch?: string[];
+    nullify?: boolean;
+    yes?: boolean;
+  };
+  const targetEventId = parsed.positionals[0];
+  if (targetEventId === undefined) {
+    throw new CliError(
+      'usage: moira correct <event-id> --reason "..." (--patch k=v [--patch k=v ...] | --nullify) [--yes]',
+    );
+  }
+  // node:util parseArgs only takes ONE value per flag occurrence — "--patch
+  // amount=1 ts=2" would silently leave "ts=2" as a stray positional (never
+  // reaching the patch, an easy way to lose a field with no error). Reject
+  // any extra positional up front instead of swallowing it silently.
+  if (parsed.positionals.length > 1) {
+    throw new CliError(
+      `moira correct は event-id 以外の裸引数を受け付けない — --patch は k=v ごとにフラグを` +
+        `繰り返す（例: --patch amount=1 --patch ts=2026-08-01）: 余分な引数 "${parsed.positionals
+          .slice(1)
+          .join(' ')}"`,
+    );
+  }
+  const reason = values.reason;
+  if (reason === undefined || reason.trim() === '') {
+    throw new CliError('moira correct は --reason が必須（§2.10 (b)）');
+  }
+  const hasPatch = values.patch !== undefined && values.patch.length > 0;
+  const hasNullify = values.nullify === true;
+  if (hasPatch === hasNullify) {
+    throw new CliError(
+      'moira correct は --patch k=v [--patch k=v ...]（フラグを k=v ごとに繰り返す）か --nullify のどちらか一方を指定する（§2.10 (i)/(ii) は排他）',
+    );
+  }
+  const patch = hasPatch ? parsePatchArgs(values.patch!) : undefined;
+
+  const repo = requireRepo();
+  const cfg = repo.loadConfig();
+  const events = repo.loadEvents();
+  const corrections = repo.loadCorrections();
+
+  const target = events.find((e) => e.id === targetEventId);
+  const warnings: string[] = [];
+  if (target === undefined) {
+    // §2.10 の対象は「元イベント id 名指し」——事前存在は要求しない。追記は可能
+    // だが対象がログに現れないままでは孤立した「幽霊訂正」になる（可視ギャップ）。
+    err(
+      `warning: 対象イベント '${targetEventId}' はログに現れません — 幽霊訂正になります` +
+        `（正典上は追記可能・可視ギャップとして残ります；§2.10）`,
+    );
+    warnings.push('対象イベント不明（幽霊訂正）');
+  } else {
+    // Locked check (I4/§2.10): fold既存イベント＋既存corrections——「この訂正が
+    // 適用される直前の読み」——で対象イベントの所属ノードが完了施錠域
+    // (implemented|accepted) に既にあるかを見る。該当なら「音の鳴る訂正」。
+    const nodeId = eventSubject(target);
+    if (nodeId !== undefined) {
+      const state = fold(events, corrections);
+      const node = state.nodes.get(nodeId);
+      if (node !== undefined && (node.lifecycle === 'implemented' || node.lifecycle === 'accepted')) {
+        err(
+          `warning: ${targetEventId} は施錠対象（完了済みノード '${nodeId}'）への訂正` +
+            `——音の鳴る訂正・計器に常設表示されます（I4/§2.10）`,
+        );
+        warnings.push(`施錠対象への訂正（ノード '${nodeId}'）`);
+      }
+    }
+  }
+
+  if (warnings.length > 0) {
+    const proceed = await confirmDestructive(
+      `${targetEventId} への訂正を追記します（${warnings.join(' / ')}）— よろしいですか？`,
+      { yes: values.yes === true },
+    );
+    if (!proceed) {
+      err(`中止しました（${targetEventId} への訂正は追記されていません）`);
+      return;
+    }
+  }
+
+  const actor = meActor(cfg);
+  const stamp = realStamper()();
+  const correction: Correction = hasNullify
+    ? { id: stamp.id, ts: stamp.ts, actor, targetEventId, reason, correctionKind: 'nullify' }
+    : {
+        id: stamp.id,
+        ts: stamp.ts,
+        actor,
+        targetEventId,
+        reason,
+        correctionKind: 'patch',
+        // The k=v→string|number map is a structural partial of the (unknown
+        // here) target event's kind — backend fold-time validation is the
+        // actual authority on field applicability (§2.10; see parsePatchValue).
+        patch: patch as unknown as EventPatch,
+      };
+  repo.appendCorrections([correction]);
+  out(
+    `± correction ${correction.id} → ${targetEventId} (${correction.correctionKind}) [${actor.kind}:${actor.id}]`,
+  );
 }
 
 function cmdCapacity(rest: string[]): void {
@@ -539,7 +792,7 @@ function cmdMilestoneSet(rest: string[]): void {
   // milestone bundle can legitimately reference a node the log doesn't know
   // about yet (typo OR not-yet-decomposed) — same "warn, human decides"
   // discipline as R-T6's target>deadline check in cmdDeadline.
-  const state = fold(repo.loadEvents());
+  const state = foldRepo(repo);
   const unknown = nodes.filter((id) => !state.nodes.has(id));
   if (unknown.length > 0) {
     err(`warning: イベントログに現れないノード id: [${unknown.join(', ')}]`);
@@ -719,7 +972,10 @@ async function cmdImportWbs(rest: string[]): Promise<void> {
   // parse → validate: collect ALL errors, write nothing if any.
   const { rows, errors: parseErrors } = parseWbsSheet(ws);
   const priorEvents = repo.loadEvents();
-  const projected = fold(priorEvents);
+  // issue #11 #7: validation/diff reads the corrected state too (foldRepo),
+  // even though `priorEvents` (raw, uncorrected) is separately threaded to
+  // validateWbs for its own `latestLifecycleTsPerNode` timing check.
+  const projected = fold(priorEvents, repo.loadCorrections());
   const validateErrors = validateWbs(rows, projected, cfg.projectRoot, today(), {
     allowExisting: update,
     priorEvents,
@@ -914,6 +1170,10 @@ function cmdReport(rest: string[]): void {
     ...(deriveOpts.startDate !== undefined ? { startDate: deriveOpts.startDate } : {}),
     dates: resolveReferenceDates(repo.loadDateEntries()),
     milestones: resolveMilestones(repo.loadMilestoneEntries()),
+    // v21/v22 §2.10 correction layer (issue #11 R6): the correction meter is
+    // all-zero (honest "no corrections") when corrections.json is empty —
+    // buildReport's existing backward-compat default.
+    corrections: repo.loadCorrections(),
   });
 
   const asJson = values.json === true;
@@ -956,7 +1216,11 @@ function cmdLog(rest: string[]): void {
   for (const e of events) {
     const subject = eventSubject(e);
     const name = subject === undefined ? '' : ` ${labels.nodeLabels[subject] ?? subject}`;
-    out(`${String(e.ts).padStart(14)}  ${e.actor.kind}:${e.actor.id}  ${e.kind}${name}${eventDetail(e)}`);
+    // Event id shown per line (issue #11 R6) so a human can discover the
+    // `moira correct <event-id>` target without reaching for --json.
+    out(
+      `${String(e.ts).padStart(14)}  [${e.id}]  ${e.actor.kind}:${e.actor.id}  ${e.kind}${name}${eventDetail(e)}`,
+    );
   }
 }
 
@@ -1174,6 +1438,18 @@ usage: moira [--dir <log-home>] <command> ...
     入力は有限数のみ・既存ログに現れないノード id は拒否（幽霊ノード防止）・1 回 5MD 超は警告のみ。
   moira relate <from> <to> [--kind dependency|supersede] [--policy ...] [--remove]
     add: 同一 (from,to,kind) の既存辺があれば拒否。remove --policy: 指定 policy の辺のみ削除（無指定は全件、従来どおり）。
+  moira correct <event-id> --reason "..." (--patch k=v [--patch k=v ...] | --nullify) [--yes|-y]
+    普遍訂正原則（§2.10）: 追記のみ・reason 必須・元イベント id 名指し。--patch は値訂正
+    （k=v を複数指定・id/kind は拒否、他は下記の型変換規則）、--nullify は誤記表明
+    （対象イベント全体を無かったものとして読む）——両者は排他。
+      型変換規則: amount・frozenBudget → 数値 / ts → epoch ms（数値そのまま、または
+      YYYY-MM-DD を UTC 深夜へ変換）/ actor・assignee・reviewer → human:<id> か
+      agent:<id> 形式を Actor へ変換（assignee・reviewer のみ文字列 "null" で
+      §2.8 の解放センチネルへ）/ children → JSON 配列
+      '[{"node":"a","estimate":2}]' / それ以外は "true"/"false" を真偽値へ、
+      他は文字列のまま（適用可否は fold 側の検証に委ねる — このレイヤは変換のみ）。
+    対象 id 不明・施錠済みノード（完了済み）への訂正は警告のうえ確認（TTY 対話時のみ）。
+    event-id は \`moira log\` の [id] で確認できる。
   moira capacity <who> <YYYY-MM-DD> <c> [--reason ...]   (human commit)
   moira deadline [<YYYY-MM-DD>] [--target <YYYY-MM-DD>] [--reason ...]   (human commit: R-T6)
   moira milestone                                        (list resolved milestones)
@@ -1250,6 +1526,8 @@ export async function runCli(argv: string[]): Promise<void> {
       return cmdCost(rest);
     case 'relate':
       return cmdRelate(rest);
+    case 'correct':
+      return cmdCorrect(rest);
     case 'capacity':
       return cmdCapacity(rest);
     case 'deadline':

@@ -153,8 +153,15 @@ export interface CorrectionNullify extends CorrectionBase {
 // (ii) 値訂正 — field(s) of the target event are corrected (§2.10). The patch
 // shape is per-kind partial; fold-time validation catches mismatches (e.g. a
 // `patch` naming `amount` on a transition-target is an inapplicable patch and
-// surfaces as a structural error). Actor and id are NEVER patched — those are
-// identity; ts and kind-specific fields are patchable.
+// surfaces as a structural error). `id` is NEVER patched — it is identity
+// (the union discriminant `kind` is likewise fixed, via EventPatch's `Omit`);
+// `ts`, `actor`, and kind-specific fields are all patchable (§2.10 (i) names
+// "amount・node・ts・actor・凍結値等" verbatim as the worked examples — issue
+// #11 gate-2 R2 #2 fixed a prior backend↔MODEL sync gap where fold.ts's
+// mergePatch silently skipped `actor`). A patch moving `actor` can still be
+// rejected as inapplicable by base-semantics re-validation — e.g. moving a
+// non-human actor onto an agreed estimate-transition is REJECTED (only a
+// human may agree, R-U4/I6) — §2.10's own named example of "検証の迂回は不能".
 export interface CorrectionPatch extends CorrectionBase {
   correctionKind: 'patch';
   patch: EventPatch;
@@ -176,18 +183,33 @@ export type EventPatch =
   | Partial<Omit<CostEvent, 'id' | 'kind'>>;
 
 // ----------------------------------------------------------------------------
-// Correction meter (v21 §2.10 (d)) — the four permanent categories:
-//   ①total   — every applied correction
-//   ②locked  — corrections targeting events on completed nodes (I4 target)
-//   ③retro   — corrections whose target event predates the correction by more
-//               than one day (retroactive correction; subsumes the pre-v21
-//               issue #36 retroactive-write warning per HA B5 unification)
+// Correction meter (v22 §2.10 (d)) — the four permanent categories:
+//   ①total   — every appended correction record;適用可否によらない (counts
+//               EVERY record, including ones that lose the latest-wins
+//               battle for a target and ones naming a non-existent target)
+//   ②locked  — corrections targeting events on completed nodes (I4 target),
+//               evaluated per record against 適用直前の読み
+//   ③retro   — the CORRECTION-SIDE half of MODEL v22's two-系 遡及 区分
+//               (訂正系; 会計層). ③ = ③a ∨ ③b, evaluated per record, 1 記録
+//               1 カウント even when a single record satisfies both:
+//                 ③a — the record's patch moves the target event's ts to
+//                      BEFORE 適用直前の読み (同一対象の先行する現行勝者まで
+//                      適用した読み;チェーン時はこれで決定的)
+//                 ③b — the record's own ts (知った時刻) lands strictly more
+//                      than 24 hours after 適用直前の読みの ts (後着訂正;
+//                      "1 日" = 経過 24 時間超 — ちょうど 24h は含まない)
+//               This bucket does NOT include 追記系 (③c 遡及イベント書き込み
+//               — an observation-layer detection over issue-time signals in
+//               the record medium, not a fold/backend accounting derivation;
+//               ③c is CLI report's concern, out of scope for this counter).
+//               See MODEL v22 §2.10 (d) for the full two-系 definition.
 //   ④inapplicable — corrections that fail base-semantics re-validation
-//                    (current-state predicate — NOT a monotonic counter)
-// ①②③ are monotonic counters, stamped at the time of application; ④ is a
-// current-state predicate. No discretional knob may remove entries from any
-// bucket (PR-CORRECTION-METER); presentation may fold/mute but the counts
-// themselves are inviolate.
+//                    (current-state predicate over the WINNER only — NOT a
+//                    per-record / monotonic counter)
+// ①②③ are per-record evaluation counters, stamped at the time of application
+// (追記された記録の評価計数); ④ alone is a current-state predicate. No
+// discretional knob may remove entries from any bucket (PR-CORRECTION-METER);
+// presentation may fold/mute but the counts themselves are inviolate.
 // ----------------------------------------------------------------------------
 
 export interface CorrectionMeterCounts {

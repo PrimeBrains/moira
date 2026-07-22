@@ -33,6 +33,7 @@ import {
   computeLandingCurve,
   computeMilestoneRollup,
   derive,
+  materializeEffectiveEvents,
   sortEvents,
 } from 'moira-backend';
 import type { Correction, CorrectionMeterCounts } from 'moira-backend';
@@ -114,18 +115,37 @@ export interface ReportJson {
   };
   series: ReportMetrics[];
   structuralErrors: string[];
-  /** Retroactive-append warning (issue #36) — null in normal operation
-   *  (honest silence); see buildRetroactiveWarning. */
+  /**
+   * ③c retroactive-WRITE detection (v22 §2.10 (d); issue #36 origin) — null
+   * in normal operation (honest silence); see findRetroactiveEvents. Kept
+   * as its own field (JSON consumers) even though formatReportText renders it
+   * together with `correctionMeter` under one alert surface (issue #11 R8).
+   * STANDING count (issue #11 #5): once a record is detected, it stays
+   * counted forever — it does NOT age out as `prev` advances past it (③ is a
+   * 常設区分, MODEL v22 §2.10 (d)).
+   */
   retroactive: RetroactiveWarning | null;
   /**
-   * v21 §2.10 (d) correction meter — 4 permanent categories (常設・no
+   * Arrival-order anomaly (issue #11 #6) — records flagged ONLY by the
+   * physical (ts,id) order-disruption signal, with NO confirmed >24h elapsed
+   * time (an undecodable id, or a decoded id whose delay is ≤24h). Physical
+   * disorder is evidence an append happened later, but NOT proof it happened
+   * more than 24h later — the fixed boundary ③c's label requires (v22 §2.10
+   * (d): "経過 24 時間超"). Disclosed honestly as its own line (MODEL's
+   * "検知の被覆限界も正直に開示する"), never folded into `retroactive`'s count
+   * (no label overclaim). null in normal operation.
+   */
+  orderAnomaly: RetroactiveWarning | null;
+  /**
+   * v22 §2.10 (d) correction meter — 4 permanent categories (常設・no
    * discretional knob; PR-CORRECTION-METER). All-zero when the log carries
-   * no corrections (honest "no corrections have been applied"). ③retroactive
-   * on this meter concerns corrections whose target predates the correction
-   * by > 1 day (see fold.ts RETROACTIVE_THRESHOLD_MS) — distinct from the
-   * pre-v21 `retroactive` field above (which detects retroactively-appended
-   * EVENTS, i.e. backdated ts on the append path). The two will be unified
-   * in a follow-up (HA B5 統合裁定・issue #6 next cycle).
+   * no corrections (honest "no corrections have been applied"). Its
+   * ③retroactive count is the CORRECTION system's ③a∨③b (backend fold.ts,
+   * accounting-layer) — a DIFFERENT population from `retroactive` above (the
+   * WRITE system's ③c, observation-layer). v22 unifies the two under one
+   * rendered alert surface without summing them (issue #11 — see
+   * formatReportText; the former "will be unified in a follow-up" note is
+   * resolved by this task).
    */
   correctionMeter: CorrectionMeterCounts;
 }
@@ -141,7 +161,28 @@ function prefixByDay(sorted: readonly Event[], day: IsoDate): Event[] {
   return sorted.filter((e) => tsDay(e.ts) <= day);
 }
 
-// --- retroactive-append detection (issue #36) --------------------------------
+/**
+ * As-of prefix for the correction layer (issue #11 #3): canon as-of is
+ * "(ts,id) ≤ T のイベント＋(ts,id) ≤ T の訂正記録" — a correction is itself a
+ * timestamped record and must be cut at the SAME day-granularity boundary as
+ * events (tsDay/prefixByDay), never passed whole to every cut. Without this,
+ * a correction issued on 7/10 would rewrite a `prev`/series point dated 7/3
+ * (non-causal — the reader on 7/3 could not have known about a correction
+ * that did not exist yet).
+ */
+function correctionsByDay(corrections: readonly Correction[], day: IsoDate): Correction[] {
+  return corrections.filter((c) => tsDay(c.ts) <= day);
+}
+
+// --- retroactive-write detection (③c — v22 §2.10 (d); issue #36 origin) -----
+//
+// This is the WRITE system's half of the v22 unified ③ category — an
+// observation-layer detector over the record medium's issue-time signals
+// (MODEL v22 §2.10 (d): 検知の被覆限界も正直に開示する), distinct from the
+// CORRECTION system's ③a/③b (backend fold.ts, accounting-layer). The two are
+// rendered under ONE alert surface by formatReportText below (issue #11 R8 —
+// 訂正跨ぎと遡及書き込みは同じ警告面で鳴り、二重表示を廃す), never summed into a
+// single number (母集団の監査可能性を保つ).
 //
 // events.json's PHYSICAL order is NOT append order: every commit path
 // (cli/src/store.ts appendEvents → backend EventStore.saveJson) fully
@@ -149,11 +190,11 @@ function prefixByDay(sorted: readonly Event[], day: IsoDate): Event[] {
 // all() == sortEvents()), so by the time `report` re-reads the file, any
 // append-order signal has already collapsed into (ts,id) order for events
 // that passed through a normal `moira ...` write. Two complementary signals
-// remain, and they are evaluated INDEPENDENTLY (OR, not either/or per event
-// — issue #37-review item 2): a genuine realStamper id does not immunize an
-// event against ALSO having been physically spliced out of order by a hand
-// edit, so both checks always run and either one flags the record (no double
-// counting — each event contributes at most one flagged entry):
+// remain, and they are evaluated INDEPENDENTLY (both checks always run — a
+// genuine realStamper id does not immunize an event against ALSO having been
+// physically spliced out of order by a hand edit) but feed TWO DIFFERENT
+// buckets (issue #11 #6 — only signal 1 can CONFIRM ③c's fixed 24h boundary;
+// signal 2 alone cannot, so it is never counted into ③c):
 //
 //  1. The event id itself. realStamper (cli/src/stamp.ts) derives id as
 //     `${ts.toString(36)}-${seq}-${rand}` from the SAME wall-clock instant it
@@ -161,11 +202,13 @@ function prefixByDay(sorted: readonly Event[], day: IsoDate): Event[] {
 //     leaving the id untouched (WBS import's `at()` helper, issue #24's
 //     ts-anchoring: `{ id: s.id, ts: epoch(actualDate) }`). Decoding the id's
 //     prefix recovers the moment the event was actually appended,
-//     independent of the (possibly backdated) `ts` field — a mismatch
-//     (appended later than the ts it claims) is a retroactive record. This
-//     is the mechanism that actually fires for real `moira import wbs` runs,
-//     since the resort above erases the physical-position signal before
-//     `report` ever sees the file.
+//     independent of the (possibly backdated) `ts` field — a mismatch of
+//     STRICTLY MORE THAN 24 ELAPSED HOURS (v22 §2.10 (d) ③c fixed boundary,
+//     issue #11 — was "any positive delay" pre-v22) between the claimed ts
+//     and the decoded append instant CONFIRMS a retroactive-WRITE (③c)
+//     record — feeds `retroactive`. This is the mechanism that actually
+//     fires for real `moira import wbs` runs, since the resort above erases
+//     the physical-position signal before `report` ever sees the file.
 //  2. Regardless of whether signal 1 fired, we ALSO scan the RAW on-disk
 //     order buildReport is handed (the `events` param, BEFORE sortEvents()
 //     below normalizes it): a running-(ts,id)-max scan over that order
@@ -173,18 +216,31 @@ function prefixByDay(sorted: readonly Event[], day: IsoDate): Event[] {
 //     spliced in out of chronological order. This is the only signal
 //     available for ids that don't match the realStamper shape (hand-edited
 //     events.json rows, a caller's own stamper — including this file's own
-//     tests), but it also catches a realStamper-shaped id whose ROW was
+//     tests), and it also catches a realStamper-shaped id whose ROW was
 //     physically moved without touching its ts/id (signal 1 alone would miss
-//     that, since appendTs == ts for such a row).
+//     that, since appendTs == ts for such a row) — BUT it carries no elapsed-
+//     time information, so on its own it cannot confirm >24h. A record
+//     flagged ONLY by this signal feeds `orderAnomaly` instead of
+//     `retroactive` (no label overclaim — issue #11 #6); a record signal 1
+//     already confirmed stays in `retroactive` even if ALSO physically out
+//     of order (no double counting — each event contributes to at most one
+//     bucket).
 //
-// Either signal, once found, is judged against the SAME (ts,id) semantics
-// fold already uses (I3/R-D5) — no new event kind or stored field (D-66).
-//
-// A THIRD refinement (issue #37-review item 1) governs whether a flagged
-// record is still WARNING-worthy today, independent of the above detection:
-// see the `gateAppendTs` field and buildRetroactiveWarning below.
+// Both buckets are STANDING counts (issue #11 #5 — MODEL v22 §2.10 (d): ③ is
+// a 常設区分／standing category; a detected record never ages out just
+// because `prev` advances past it) — judged against the SAME (ts,id)
+// semantics fold already uses (I3/R-D5), no new event kind or stored field
+// (D-66).
 
 const REAL_STAMP_ID_RE = /^([0-9a-z]+)-\d{6}-[0-9a-z]{4}$/;
+
+// v22 §2.10 (d) ③c boundary — "起きたとされる ts より経過 24 時間超後に追記された
+// イベント" (strict; exactly 24h does NOT count). Twin constant of backend
+// fold.ts's RETROACTIVE_THRESHOLD_MS (③b) — same fixed 24h bound, no knob —
+// but ③c is an OBSERVATION-layer detector over the append-time signal
+// (decoded realStamper id / physical-order disruption), not a fold/backend
+// accounting derivation (out of fold's scope; see MODEL v22 §2.10 (d)).
+const RETROACTIVE_WRITE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 
 /** Wall-clock append instant encoded in a realStamper-shaped id, or null if
  *  the id doesn't match that shape — no signal, so no verdict (avoids false
@@ -219,55 +275,57 @@ function eventNode(e: Event): NodeId | null {
   }
 }
 
-interface RetroactiveEvent {
+interface FlaggedEvent {
   ts: number;
   node: NodeId | null;
-  /**
-   * The wall-clock append instant, but ONLY when signal 1 (id-decode) is what
-   * flagged this record — null otherwise (id undecodable, or flagged solely
-   * via signal 2's physical-order scan). buildRetroactiveWarning uses this to
-   * decide whether a record is still warning-worthy TODAY (issue #37-review
-   * item 1): an id-decoded record already appended before `prev` was already
-   * folded into an earlier report and should stop nagging; a physical-order-
-   * only detection has no known append time, so it keeps warning forever
-   * (the accepted fallback — see the file-header comment above).
-   */
-  gateAppendTs: number | null;
 }
 
-/** Scan the RAW (as-loaded) event order and flag every retroactively-appended
- *  event, via EITHER of the two signals above (independently — see the
- *  file-header comment; issue #37-review item 2). */
-function findRetroactiveEvents(rawEvents: readonly Event[]): RetroactiveEvent[] {
-  const flagged: RetroactiveEvent[] = [];
+/**
+ * Two INDEPENDENT signals over the RAW (as-loaded) event order (issue
+ * #37-review item 2 — both always run, either flags a record):
+ *
+ *   1. id-decode: appendTs − ts > 24h (strict) — the ONLY signal that can
+ *      actually CONFIRM the ③c predicate (v22 §2.10 (d): "経過 24 時間超").
+ *      Feeds `retroactive`.
+ *   2. physical-order disruption (running (ts,id)-max scan): evidence an
+ *      append happened LATER than its neighbour, but carries no elapsed-time
+ *      information of its own — it cannot confirm >24h (issue #11 #6: MODEL
+ *      names "到着順の乱れ" as one of ③c's detection signals, but the fixed
+ *      24h boundary is ③c's own label, and order alone cannot prove it was
+ *      crossed). A record flagged ONLY by this signal (id undecodable, or
+ *      decoded but ≤24h) is disclosed honestly as a SEPARATE arrival-order
+ *      anomaly, never counted into ③c (no label overclaim). A record the
+ *      id-decode signal already confirmed stays in `retroactive` even if it
+ *      is ALSO physically out of order (no double counting).
+ */
+function findRetroactiveEvents(rawEvents: readonly Event[]): {
+  retroactive: FlaggedEvent[];
+  orderAnomalies: FlaggedEvent[];
+} {
+  const retroactive: FlaggedEvent[] = [];
+  const orderAnomalies: FlaggedEvent[] = [];
   let runningMax: Event | undefined;
   for (const e of rawEvents) {
     const appendTs = decodeAppendTs(e.id);
-    const idRetroactive = appendTs !== null && appendTs > e.ts;
-    const physicallyRetroactive =
+    // v22 §2.10 (d) ③c: strict >24h elapsed between the claimed ts and the
+    // decoded append instant (issue #11; was "any positive delay" pre-v22).
+    const idRetroactive =
+      appendTs !== null && appendTs - e.ts > RETROACTIVE_WRITE_THRESHOLD_MS;
+    const physicallyOutOfOrder =
       runningMax !== undefined && cmpTsId(e, runningMax) < 0;
-    if (idRetroactive || physicallyRetroactive) {
-      flagged.push({
-        ts: e.ts,
-        node: eventNode(e),
-        gateAppendTs: appendTs !== null && idRetroactive ? appendTs : null,
-      });
+    if (idRetroactive) {
+      retroactive.push({ ts: e.ts, node: eventNode(e) });
+    } else if (physicallyOutOfOrder) {
+      orderAnomalies.push({ ts: e.ts, node: eventNode(e) });
     }
     if (runningMax === undefined || cmpTsId(e, runningMax) > 0) runningMax = e;
   }
-  return flagged;
+  return { retroactive, orderAnomalies };
 }
 
 const RETROACTIVE_NODE_DISPLAY_LIMIT = 5;
 
 export interface RetroactiveWarning {
-  /** Retroactive records whose (semantic, possibly backdated) ts falls on or
-   *  before `prev` — the ones that actually rewrite a day the reader already
-   *  compared against — AND (issue #37-review item 1) still warning-worthy
-   *  today: an id-decoded record whose append itself happened on or before
-   *  `prev` was already folded into an earlier report and is excluded here,
-   *  even though it still counts in findRetroactiveEvents. See
-   *  buildRetroactiveWarning's docstring for the exact gate. */
   count: number;
   /** Oldest offending ts (epoch ms) among those records. */
   oldestTs: number;
@@ -278,45 +336,21 @@ export interface RetroactiveWarning {
   moreNodesCount: number;
 }
 
-/**
- * `null` when nothing is retroactive-into-the-already-reported-past — normal
- * operation stays silent (no warning fabricated where there is nothing to
- * warn about). A retroactive record ts'd AFTER `prev` doesn't change the Δ
- * already reported, so it is excluded here (still counted by
- * findRetroactiveEvents, just not warning-worthy).
- *
- * issue #37-review item 1: an id-decoded record (gateAppendTs !== null) is
- * ALSO excluded once its append itself is no longer new — i.e. once the
- * append happened on or before `prev`, it was already folded into an earlier
- * report's Δ, and re-warning on it every single day thereafter would be a
- * permanent false alarm on old, already-digested history (the exact defect
- * this fix closes). Records with no known append time (gateAppendTs === null
- * — undecodable id, or a physical-order-only detection) have no such gate:
- * they keep warning until the underlying record is fixed, per the accepted
- * fallback documented at findRetroactiveEvents/RetroactiveEvent above.
- */
-function buildRetroactiveWarning(
-  rawEvents: readonly Event[],
-  prev: IsoDate,
-): RetroactiveWarning | null {
-  const relevant = findRetroactiveEvents(rawEvents).filter((e) => {
-    if (tsDay(e.ts) > prev) return false;
-    if (e.gateAppendTs !== null) return tsDay(e.gateAppendTs) > prev;
-    return true;
-  });
-  if (relevant.length === 0) return null;
-
+/** Aggregate a flagged-event list into the display shape, or null when empty
+ *  (honest silence — no warning fabricated where there is nothing to warn
+ *  about). Shared by both the ③c bucket and the order-anomaly bucket. */
+function aggregateWarning(records: readonly FlaggedEvent[]): RetroactiveWarning | null {
+  if (records.length === 0) return null;
   const nodesSeen = new Set<NodeId>();
   const nodes: NodeId[] = [];
-  for (const e of relevant) {
-    if (e.node === null || nodesSeen.has(e.node)) continue;
-    nodesSeen.add(e.node);
-    if (nodes.length < RETROACTIVE_NODE_DISPLAY_LIMIT) nodes.push(e.node);
+  for (const r of records) {
+    if (r.node === null || nodesSeen.has(r.node)) continue;
+    nodesSeen.add(r.node);
+    if (nodes.length < RETROACTIVE_NODE_DISPLAY_LIMIT) nodes.push(r.node);
   }
-
   return {
-    count: relevant.length,
-    oldestTs: Math.min(...relevant.map((e) => e.ts)),
+    count: records.length,
+    oldestTs: Math.min(...records.map((r) => r.ts)),
     nodes,
     moreNodesCount: Math.max(0, nodesSeen.size - nodes.length),
   };
@@ -335,15 +369,24 @@ export function buildReport(events: readonly Event[], opts: ReportOptions): Repo
       asOf: day,
       ...(opts.capacityOf !== undefined ? { capacityOf: opts.capacityOf } : {}),
       ...(opts.startDate !== undefined ? { startDate: opts.startDate } : {}),
-      // The correction layer is timeless in structure — we pass it whole to
-      // every derive() call; latest-wins per targetEventId collapses it, and
-      // corrections targeting events not-yet-in-the-prefix simply have no
-      // effect at that cut (their target isn't in the effective stream).
-      corrections,
+      // issue #11 #3: corrections are cut at the SAME (ts,id)/day boundary as
+      // events (correctionsByDay), not passed whole — a correction issued
+      // AFTER `day` must not rewrite that day's reading (non-causal read
+      // otherwise). latest-wins per targetEventId still collapses within the
+      // cut cohort, and corrections targeting events not-yet-in-the-prefix
+      // simply have no effect at that cut (their target isn't in the
+      // effective stream).
+      corrections: correctionsByDay(corrections, day),
     });
 
   const now = deriveAt(opts.asOf);
   const prev = deriveAt(opts.prev);
+
+  // ③c retroactive-WRITE detection (issue #11 #5/#6) — scanned once over the
+  // RAW as-loaded `events` (not `sorted`/prefix-cut: this is an
+  // observation-layer detector over the record medium's issue-time signals,
+  // independent of as-of/re-derivation — see the file-header comment).
+  const retroactiveScan = findRetroactiveEvents(events);
 
   const metricsOf = (d: DerivedState): ReportMetrics => ({
     date: d.asOf,
@@ -366,8 +409,44 @@ export function buildReport(events: readonly Event[], opts: ReportOptions): Repo
   );
 
   // Feature rollup: engine EV over each root-child slice, at both cuts.
-  const nowRows = computeFeatureRollup(prefixByDay(sorted, opts.asOf), opts.projectRoot);
-  const prevRows = computeFeatureRollup(prefixByDay(sorted, opts.prev), opts.projectRoot);
+  //
+  // issue #11 gate-2 R2 #1 (resolves the former #4 known-limitation note):
+  // `computeFeatureRollup`/`computeMilestoneRollup`/`computeLandingCurve` all
+  // fold their raw `Event[]` argument internally with NO corrections
+  // parameter of their own (their signatures stay frozen — see their
+  // file-header "same INDEPENDENT-derivation discipline" notes in
+  // moira-backend/src/derivations/*.ts). MODEL §2.10's one-line principle —
+  // "訂正適用後のログは…全導出でそのまま読み直される一つのログ" — means these
+  // three report sections must see the SAME corrected reading `deriveAt`
+  // above already gives the headline pair. Rather than threading a
+  // `corrections` option onto three call sites, the CLI now pre-materializes
+  // the corrected event stream ONCE per cut via the barrel's
+  // `materializeEffectiveEvents` (backend/src/fold.ts — a thin, meter-less
+  // exposure of the SAME `applyCorrections` effective-stream construction
+  // `derive`/`fold` use internally, so there is no second implementation of
+  // §2.10's patch/nullify/latest-wins merge to drift) and hands that
+  // corrected `Event[]` to each `compute*` function AS-IS — their signatures
+  // are unchanged. Cut at the SAME (ts,id)/day boundary as `deriveAt`
+  // (prefixByDay + correctionsByDay — issue #11 #3's cut convention).
+  //
+  // This also fixes a SECOND desync the #4 note didn't name: the milestone
+  // rollup below is handed `now.forecast` (already corrected, from `now =
+  // deriveAt(opts.asOf)`) alongside its `events` argument — pre-fix, that
+  // `events` argument was the RAW log while `now.forecast` was corrected, so
+  // a nullify/patch could desync a milestone's attributed leaves from their
+  // (differently-corrected) predictions — the internal-contradiction failure
+  // mode this task's description warns about. Both arguments now come from
+  // the SAME corrected cut.
+  const effectiveAt = (day: IsoDate): Event[] =>
+    materializeEffectiveEvents(prefixByDay(sorted, day), correctionsByDay(corrections, day));
+  // Computed once — `applyCorrections` re-runs a per-record fold internally,
+  // so the three `asOf`-cut call sites below (features/milestones/landing)
+  // share this single result rather than each re-deriving it (deterministic
+  // either way; this just avoids pure redundant work).
+  const effAsOf = effectiveAt(opts.asOf);
+
+  const nowRows = computeFeatureRollup(effAsOf, opts.projectRoot);
+  const prevRows = computeFeatureRollup(effectiveAt(opts.prev), opts.projectRoot);
   const prevEvOf = new Map(prevRows.map((r) => [r.feature, r.evAbs]));
   const features: ReportFeatureRow[] = nowRows.map((r) => {
     const prevEvAbs = prevEvOf.get(r.feature) ?? 0;
@@ -387,10 +466,11 @@ export function buildReport(events: readonly Event[], opts: ReportOptions): Repo
   // milestone's node-id bundle, at `asOf`. Reuses `now.forecast` — the SAME
   // single derive() leveler run above — rather than re-leveling a subset (see
   // milestone-rollup.ts's file-header rationale). No section when no
-  // milestone is defined (existing optional-section discipline).
+  // milestone is defined (existing optional-section discipline). Corrections
+  // applied via effectiveAt — issue #11 gate-2 R2 #1 (see comment above).
   const milestones: MilestoneRollupRow[] =
     opts.milestones !== undefined && opts.milestones.length > 0
-      ? computeMilestoneRollup(prefixByDay(sorted, opts.asOf), opts.milestones, now.forecast, {
+      ? computeMilestoneRollup(effAsOf, opts.milestones, now.forecast, {
           asOf: opts.asOf,
         })
       : [];
@@ -398,8 +478,9 @@ export function buildReport(events: readonly Event[], opts: ReportOptions): Repo
   // Landing vs reference dates — the canonical D_pred from computeLandingCurve
   // (NOT a hand-rolled max over forecast rows: the leveler also levels completed
   // leaves, so their phantom predictions would dishonestly push the max out).
-  // Observation only; the judgement stays human (R-T4).
-  const curve = computeLandingCurve(prefixByDay(sorted, opts.asOf), {
+  // Observation only; the judgement stays human (R-T4). Corrections applied
+  // via effectiveAt — issue #11 gate-2 R2 #1 (see comment above).
+  const curve = computeLandingCurve(effAsOf, {
     asOf: opts.asOf,
     ...(opts.capacityOf !== undefined ? { capacityOf: opts.capacityOf } : {}),
     ...(opts.startDate !== undefined ? { startDate: opts.startDate } : {}),
@@ -443,7 +524,8 @@ export function buildReport(events: readonly Event[], opts: ReportOptions): Repo
     },
     series,
     structuralErrors: now.structuralErrors,
-    retroactive: buildRetroactiveWarning(events, opts.prev),
+    retroactive: aggregateWarning(retroactiveScan.retroactive),
+    orderAnomaly: aggregateWarning(retroactiveScan.orderAnomalies),
     correctionMeter: now.correctionMeter,
   };
 }
@@ -495,26 +577,48 @@ export function formatReportText(
     `  SPI ${fmt(r.prevMetrics.spi)} → ${fmt(r.now.spi)} | CPI ${fmt(r.prevMetrics.cpi)} → ${fmt(r.now.cpi)}`,
   ];
 
-  if (r.retroactive !== null) {
-    const shown = r.retroactive.nodes.map(name).join(', ');
-    const more = r.retroactive.moreNodesCount > 0 ? ` (+他${r.retroactive.moreNodesCount}件)` : '';
-    lines.push(
-      `  ⚠ 遡及記録 ${r.retroactive.count} 件（前回営業日以前の日付への追記あり — Δ は書き換わった過去との比較）`,
-      `    対象: ${shown === '' ? '(不明)' : shown}${more} | 最古の遡及日付: ${tsDay(r.retroactive.oldestTs)}`,
-    );
-  }
-
-  // v21 §2.10 (d) correction meter — 4 permanent categories. Rendered only
-  // when a correction has actually landed (total > 0), keeping the empty log
-  // silent (§2.1 honesty). All 4 counts are shown together — no discretional
-  // "hide small categories" knob (PR-CORRECTION-METER; presentation may fold
-  // via omission-when-empty, but the counts themselves stay whole).
+  // v22 §2.10 (d) unified ③ alert surface (issue #11 R8) — the CORRECTION
+  // system (③a∨③b, backend fold's correctionMeter.retroactive) and the WRITE
+  // system (③c, r.retroactive — this file's id-decode/physical-order
+  // detection) ring under ONE ⚠ block, never a summed number (母集団の
+  // 監査可能性を保つ；系ごとの計数を共表示). Either system alone is enough to
+  // show the block; both absent → honest silence (no block at all). This
+  // replaces the pre-v22 two separate ⚠ blocks (⚠ 遡及記録 / ⚠ 訂正記録) that
+  // rang on the same page for two different reasons — 二重表示を廃す.
   const cm = r.correctionMeter;
-  if (cm.total > 0) {
+  if (cm.total > 0 || r.retroactive !== null || r.orderAnomaly !== null) {
     lines.push(
-      `  ⚠ 訂正記録 総数 ${cm.total} 件（§2.10・追記専用の第二層——Δ は訂正跨ぎで書き換わった過去との比較）`,
-      `    施錠対象 ${cm.locked} / 遡及 ${cm.retroactive} / 適用不能 ${cm.inapplicable}`,
+      `  ⚠ 訂正・遡及（§2.10 ③——訂正跨ぎと遡及書き込みは同じ警告面で鳴ります。Δ は書き換わった過去との比較）`,
     );
+    // 訂正系（③a∨③b・会計層・fold 計数） — corrections applied against the log.
+    if (cm.total > 0) {
+      lines.push(
+        `    訂正記録 総数 ${cm.total} 件（施錠対象 ${cm.locked} / 遡及 ${cm.retroactive} / 適用不能 ${cm.inapplicable}）`,
+      );
+    }
+    // 追記系（③c・観測層検知） — events whose append CONFIRMED lagged their
+    // claimed ts by strictly more than 24h (id-decode signal only — §2.10
+    // (d); issue #11 #5/#6: standing count, never ages out).
+    if (r.retroactive !== null) {
+      const shown = r.retroactive.nodes.map(name).join(', ');
+      const more = r.retroactive.moreNodesCount > 0 ? ` (+他${r.retroactive.moreNodesCount}件)` : '';
+      lines.push(
+        `    遡及書き込み ${r.retroactive.count} 件（起きたとされる日付から24時間超後に追記）`,
+        `      対象: ${shown === '' ? '(不明)' : shown}${more} | 最古の遡及日付: ${tsDay(r.retroactive.oldestTs)}`,
+      );
+    }
+    // 到着順の乱れ（観測異常・別行） — physical (ts,id) order disruption with NO
+    // confirmed >24h elapsed time (issue #11 #6): evidence of a later append,
+    // but not proof it crossed ③c's fixed boundary — disclosed honestly,
+    // never folded into the 遡及書き込み count above (no label overclaim).
+    if (r.orderAnomaly !== null) {
+      const shown = r.orderAnomaly.nodes.map(name).join(', ');
+      const more = r.orderAnomaly.moreNodesCount > 0 ? ` (+他${r.orderAnomaly.moreNodesCount}件)` : '';
+      lines.push(
+        `    到着順の乱れ ${r.orderAnomaly.count} 件（物理順序が逆転 — 24時間超は未確証・観測異常）`,
+        `      対象: ${shown === '' ? '(不明)' : shown}${more} | 最古の日付: ${tsDay(r.orderAnomaly.oldestTs)}`,
+      );
+    }
   }
 
   lines.push('', `## 期間の出来事（${r.activity.length}件）`);

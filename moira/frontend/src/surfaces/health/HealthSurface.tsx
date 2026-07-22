@@ -98,10 +98,10 @@ export function HealthSurface() {
             testid="metric:correction-locked"
           />
           <SummaryStat
-            label="遡及訂正"
+            label="遡及（訂正系）"
             value={d.correctionMeter.retroactive.toFixed(0)}
             tone={d.correctionMeter.retroactive > 0 ? 'warn' : 'neutral'}
-            sub="対象イベントより 1 日以上後に発行された訂正"
+            sub="対象イベントの ts を過去へ動かす訂正・対象イベントより経過 24h 超後に発行された訂正"
             testid="metric:correction-retro"
           />
           <SummaryStat
@@ -116,7 +116,9 @@ export function HealthSurface() {
           §2.10（普遍訂正原則）の第二層記録は追記専用・理由必須・元イベント id 名指し。
           <b>4 区分は常設</b>で、UI で畳む/沈めるは可でも、特定の訂正を計数から除外するオプションは持たない
           （PR-CORRECTION-METER）。①②③は単調計数（適用直前の読みでスタンプ）、④のみ現在状態述語。
-          遡及書き込み警告（旧 issue #36）は本計器の③遡及に統合予定（配線は今後）。
+          ③遡及は訂正系（ts を過去へ動かす訂正・24h 超後着の訂正）のみを計数——③の追記系（過去日付への
+          イベント書き込み）は観測層の検知として CLI report が担う（本ゾーンには現れない）。
+          旧 issue #36 遡及書き込み警告は③に統合済み。
         </div>
       </Card>
 

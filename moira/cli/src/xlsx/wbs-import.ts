@@ -353,6 +353,10 @@ const EMPTY_PROJECTED: ProjectedState = {
   seenCostIds: new Set(),
   structuralErrors: [],
   appliedAt: 0,
+  // v21/v22 §2.10 (d) correction meter — this projection never sees a
+  // correction layer (WBS import plans against the bare event log), so the
+  // all-zero meter is the honest "no corrections" read (fold.ts's emptyMeter).
+  correctionMeter: { total: 0, locked: 0, retroactive: 0, inapplicable: 0 },
 };
 
 /**

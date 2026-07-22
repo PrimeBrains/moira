@@ -86,7 +86,8 @@ export function computeDriftReport(workDir: string, homeRoot: string, feature?: 
   const cfg = repo.loadConfig();
   const adapterCfg = loadAdapterConfig(homeRoot);
   const expected = provider.loadExpected(workDir, cfg.projectRoot);
-  const projected = fold(repo.loadEvents());
+  // §2.10/A2 合成読み: drift 比較も訂正適用後の読みに対して行う（issue #11 #7 是正の残余配線）
+  const projected = fold(repo.loadEvents(), repo.loadCorrections());
   const options: Parameters<typeof computeDrift>[2] = {
     projectRoot: cfg.projectRoot,
     provider: provider.id,

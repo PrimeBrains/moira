@@ -358,3 +358,208 @@ B2 Important: R1 パッチ産の「訂正系①②③④」語衝突・③c の�
 | B7 (Suggestion) | 証跡提示——③b の fold 述語は fact-checker R1 claim1 で CONFIRMED（fold.ts:35 RETROACTIVE_THRESHOLD_MS=24h・fold.ts:284-285 `winner.ts - ev.ts > THRESHOLD`＝経過 24h 超・strict）。report 検出器（イベント側・任意正遅延）は③c 側の話であり、§7#20 が「1 日規則へ整合させる」を実装義務として明記済み（ヘッダ主張は③b＝fold 述語について正確） |
 | B8 (Suggestion) | 修正——C-R2-4 と同一パッチ（境界の一文定義） |
 | B9 / C-R2-8 / A13 系 (FYI/Suggestion) | 記録のみ——PASS 先行記載・NAMING note は確定コミット時にのみ着地する draft（v21 と同 pattern） |
+
+
+## codex 実装レビュー（ゲート 2・R1）生指摘全文（2026-07-22）
+
+呼び出し: `npx -y @openai/codex@latest exec --sandbox read-only`（read-only・vitest 実行不可のため静的トレース——テスト実走は著者側で全 green 確認済み）
+
+1. **Critical — invalid latest correction removes the target instead of leaving the prior valid reading in force.**  
+   [fold.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/backend/src/fold.ts:350)
+
+   `winnerByTarget` selects the latest record before validation. If that winner contains a foreign field, lines 362–369 skip the original event entirely. Canon requires an inapplicable correction to enter no register and leave the preceding valid correction—or the original event—in force.
+
+   Failing scenario: valid `c1` patches a cost from 2 to 3; later `c2` patches foreign field `children`. Expected effective amount is 3. Actual behavior drops the cost event, producing amount 0. This also means invalid chain members become `priorWinner` during ③ evaluation at line 340, so later ③a/③b stamps can be evaluated against a correction that canon says never became current.
+
+2. **Important — ② locked counts are not evaluated per record against the immediately preceding reading.**  
+   [fold.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/backend/src/fold.ts:225)
+
+   The implementation folds the uncorrected base log once, takes its final lifecycle, and applies that same locked bit to every correction on the target. Canon explicitly requires ②, ③a, and ③b to be evaluated per correction in `(ts,id)` order against the reading immediately before that record.
+
+   Failing scenario: a first correction nullifies the transition that completed node A; a later correction targets A’s earlier cost. Immediately before the second correction, A is no longer completed, so it should not add to ②. The implementation still counts it because the uncorrected final log was completed. The minimal replay also ignores structural validity and always uses the original target’s subject, so node/endpoint-changing chains can be stamped against the wrong dimension.
+
+3. **Important — report as-of cuts apply corrections that had not yet been issued.**  
+   [report.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/report.ts:362)
+
+   Every `deriveAt(day)` receives the entire corrections array. Canon’s as-of rule is events and corrections with `(ts,id) ≤ T`. A correction issued on July 10 therefore rewrites the July 3 `prev`, earlier series points, and even a report whose `asOf` precedes July 10. This understates or erases the correction-spanning delta and makes historical output non-causal.
+
+   Corrections should be cut independently by their own `(ts,id)` for every `deriveAt` point. There is no test covering this.
+
+4. **Important — major report sections still compute from the uncorrected event stream.**  
+   [report.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/report.ts:397)
+
+   Headline metrics use corrected `deriveAt`, but feature rollups, milestone rollups, and landing/deadline calculations receive raw `prefixByDay(...)` events at lines 398–435. A correction to an estimate, completion, dependency, cost, or timestamp can therefore change the headline while the feature/milestone/landing sections continue reporting the original record. This violates the canonical “corrected log is read as one log under all derivations” rule and can create internally contradictory reports.
+
+5. **Important — detected ③c records disappear from the write-system count on later reports.**  
+   [report.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/report.ts:292)
+
+   `buildRetroactiveWarning` deliberately excludes an ID-decoded write once its decoded append day is on or before `prev`. Canon makes detected ③c part of the standing, non-excludable instrument. It may be presented compactly, but it cannot age out of accounting.
+
+   Failing scenario: an event claiming July 1 is appended July 3. A July 3 report can show it, but once `prev` reaches July 3, the write-system count becomes absent even though the same detected record remains in the log.
+
+6. **Important — the physical-order detector bypasses the strict 24-hour boundary.**  
+   [report.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/report.ts:269)
+
+   ID-decoded detection correctly uses `> 24h`, but any `(ts,id)` physical inversion is counted regardless of elapsed time. Physical disorder is evidence that an append was later, not that it was more than 24 hours later.
+
+   Failing scenario: two opaque-ID events are physically appended one minute apart, with the second claiming a timestamp two minutes earlier. It is classified and displayed as “24時間超後に追記” even though no signal establishes that. The new boundary tests intentionally sort their fixtures, so they do not exercise this path.
+
+7. **Important — corrections are not wired into existing CLI projections and write guards.**  
+   [commands.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/commands.ts:1031)
+
+   `moira show` derives only from `events.json`; numerous existing command guards similarly call `fold(repo.loadEvents())` without corrections. Only `report` and the new command’s warning check load `corrections.json`.
+
+   Concrete consequences:
+
+   - Correcting a cost from 2 to 0.5 changes `report`, while `moira show` still displays 2.
+   - Nullifying a mistaken cancel does not make subsequent lifecycle commands see the recovered state.
+   - Corrected containment/dependency/lifecycle state is ignored by existing write validation.
+
+   This is an unintended split-brain behavior for existing commands and conflicts with A2’s revised composite read.
+
+8. **Important — the `k=v` write path cannot represent all canonically correctable fields and rejects `actor` contrary to MODEL.md.**  
+   [commands.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/commands.ts:438)
+
+   Only `amount` and `ts` receive type conversion; every other value remains a string, while `actor` is rejected outright. MODEL §2.10 explicitly lists actor and frozen values among correctable fields, and all first-tier event records are correctable.
+
+   Consequently, the CLI cannot correctly express fields such as:
+
+   - `actor`, `assignee`, or `reviewer` objects;
+   - numeric `frozenBudget`;
+   - `children` arrays;
+   - boolean/null/object values where required.
+
+   For example, `--patch frozenBudget=3` persists `"3"` rather than `3`, while `--patch actor=human:alice` is rejected. The tests cover only amount/ts and reinforce the narrower, non-canonical behavior.
+
+9. **Suggestion — corrections persistence lacks validation, atomic replacement, and concurrency protection.**  
+   [store.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/store.ts:211)
+
+   `loadCorrections` trusts arbitrary JSON as `Correction[]`, and `appendCorrections` performs an unlocked read-modify-rewrite directly to the destination. Malformed files can crash commands or inject structurally malformed records; concurrent `moira correct` processes can lose one append; interruption during `writeFileSync` can truncate the entire history. At minimum, schema validation and temp-file-plus-rename would make the new append-only ledger materially safer.
+
+10. **Suggestion — test coverage misses the highest-risk regressions.**  
+    [correction.test.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/backend/src/correction.test.ts:401)
+
+    The added ③a, ③a∨③b dedup, total-all-records, exact-boundary, and unified-header assertions are useful and non-vacuous. The one-header regression guard is particularly appropriate. Missing tests include:
+
+    - invalid latest correction preserving the prior valid winner/original;
+    - invalid chain members not becoming the “current winner” for later stamps;
+    - ② changing across a correction chain;
+    - correction-ts filtering at `prev`, `asOf`, and series cuts;
+    - corrected feature/milestone/landing sections;
+    - ③c persistence across later reports;
+    - physical-order-only records inside 24 hours;
+    - `moira show` and existing write guards observing corrections;
+    - typed patches beyond amount/ts;
+    - byte-identical behavior for an existing repository with no `corrections.json`.
+
+11. **FYI — ancillary changes appear sound by inspection.**  
+    The backend type-barrel exports are additive, the WBS projected-state literal now supplies the required zero correction meter, the frontend label accurately distinguishes the correction-side count, init seeds `corrections.json`, missing-file loading preserves old repositories, and `moira log` exposes event IDs as requested. The unified text formatter emits one alert header and keeps per-system numbers separate rather than summing them.
+
+I could not execute the Vitest suite because the workspace is read-only and Vite attempted to create a temporary bundled config beside `vitest.config.ts`, failing with `EROFS`. Findings above are therefore based on static tracing of the full scoped diff and canon.
+tokens used
+81,375
+
+
+## codex 実装レビュー 是正確認（ゲート 2・R2）全文（2026-07-22）
+
+7 件 CONFIRMED-FIXED・2 件 PARTIAL（#7: adapter drift の未配線 1 箇所／#9: patch 値の構造検証不足）。
+
+1. **CONFIRMED-FIXED — invalid latest correction no longer drops the target**
+
+   Corrections are processed in `(ts,id)` order and only admitted into `winnerByTarget` after local validation. Invalid corrections increment `inapplicable` and continue without replacing the prior winner: [fold.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/backend/src/fold.ts:374), [fold.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/backend/src/fold.ts:427), [fold.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/backend/src/fold.ts:441).
+
+   `buildEffectiveEvents` consequently retains either the previous valid winner or the original event: [fold.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/backend/src/fold.ts:228).
+
+2. **CONFIRMED-FIXED — locked classification uses the per-record preceding reading**
+
+   Before every correction, the current valid winner map is materialized and folded through `foldEventsOnly`; locked status is read from that prefix state before admitting the current record: [fold.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/backend/src/fold.ts:383), [fold.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/backend/src/fold.ts:387).
+
+   This correctly preserves self-reference behavior: a correction nullifying the completing transition sees the node as completed, while the following correction sees the reopened state.
+
+3. **CONFIRMED-FIXED — report corrections obey as-of cuts**
+
+   `correctionsByDay` filters correction knowledge time at every requested day: [report.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/report.ts:173).
+
+   It is used for headline `derive` calls, series/previous cuts, and effective-stream materialization: [report.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/report.ts:367), [report.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/report.ts:440).
+
+4. **CONFIRMED-FIXED — previously uncorrected report sections now use effective events**
+
+   The backend exports the same correction implementation through `materializeEffectiveEvents`: [fold.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/backend/src/fold.ts:520), [index.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/backend/src/index.ts:24).
+
+   Feature, milestone, and landing derivations receive the corrected day-cut stream: [report.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/report.ts:440), [report.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/report.ts:448), [report.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/report.ts:469), [report.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/report.ts:482).
+
+5. **CONFIRMED-FIXED — ③c is now a standing count**
+
+   The detector scans the complete raw event collection and is no longer conditioned on `prev`: [report.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/report.ts:385), [report.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/report.ts:527).
+
+6. **CONFIRMED-FIXED — physical order alone no longer claims the >24h predicate**
+
+   Only a decoded append-time difference strictly greater than 24 hours enters `retroactive`; physical-order-only findings enter `orderAnomalies`: [report.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/report.ts:301), [report.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/report.ts:312).
+
+   Formatting exposes these separately and explicitly says the order anomaly does not establish >24 hours: [report.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/report.ts:600), [report.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/report.ts:614).
+
+7. **PARTIAL — named guards are fixed, but one CLI projection remains split-brain**
+
+   The claimed main paths are wired correctly through `foldRepo` or `buildDeriveOptions`: [commands.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/commands.ts:139), [commands.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/commands.ts:143). This covers add, assign, lifecycle, cost, relate, milestone, show, report, and WBS validation.
+
+   However, adapter drift still folds only raw events:
+
+   - [drift.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/adapter/drift/drift.ts:89): `fold(repo.loadEvents())`
+
+   Therefore a correction can change `show`/`report`/guards while `moira adapter drift` continues comparing against the uncorrected state. The broad “split-brain fixed” disposition is not fully true.
+
+8. **CONFIRMED-FIXED — patch typing and actor handling**
+
+   CLI conversion now handles numeric fields, timestamps, nullable assignee/reviewer, actor objects, structured children, and booleans: [commands.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/commands.ts:493).
+
+   Only `id` and `kind` are rejected: [commands.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/commands.ts:466).
+
+   Backend allowed fields include actor and the full kind-specific set: [fold.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/backend/src/fold.ts:141). The non-human agreed transition is rejected before winner admission: [fold.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/backend/src/fold.ts:193), [fold.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/backend/src/fold.ts:433).
+
+   The disclosed three remaining base-switch validation cases remain visible and intentionally out of this disposition.
+
+9. **PARTIAL — atomic replacement is fixed, but schema validation is insufficient**
+
+   Temp-file plus rename provides atomic replacement: [store.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/store.ts:285).
+
+   Top-level JSON, correction discriminator, required properties, actor shell, and patch-object existence are validated: [store.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/store.ts:166).
+
+   But patch values are not structurally validated. For example, this passes `loadCorrections`:
+
+   ```json
+   {
+     "correctionKind": "patch",
+     "patch": { "children": {} }
+   }
+   ```
+
+   It can subsequently create a malformed effective `decompose` event and fail while folding it. The validator therefore does not fully meet its stated purpose of stopping malformed persisted records before derivation. It also accepts empty IDs/reasons and non-finite `ts` at the assertion level, although non-finite numbers cannot normally survive ordinary JSON serialization.
+
+   Deferring multi-process locking to issue #15 is consistent with the human disposition and is not counted against this result.
+
+## New/regression findings
+
+- **Important — adapter drift remains correction-unaware.** This is the remaining split-brain path described under item 7, at [drift.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/adapter/drift/drift.ts:89).
+
+- **Important — malformed persisted patch values bypass the new validation and can still crash derivation.** The check accepts any plain patch object at [store.ts](/home/koshi/github/moira/.claude/worktrees/issue-11/moira/cli/src/store.ts:183), without validating values against the `EventPatch` shapes.
+
+No other new defect was found in the modified correction winner, prefix-fold, as-of, rollup, ③c, alert-surface, or actor-admission paths.
+
+## Verification
+
+- Backend TypeScript check: passed.
+- CLI TypeScript check: passed.
+- `git diff --check`: only reports trailing whitespace in the excluded `moira/changes/` record.
+- Vitest could not start because the read-only filesystem prevented Vite from creating its temporary bundled-config file beside `vitest.config.ts`; this was an environment limitation, not a test failure.
+tokens used
+53,542
+I reviewed the current uncommitted non-Markdown diff, including all correction application, reporting, CLI guard, parser, and persistence paths.
+
+## Dispositions
+
+
+### PARTIAL 2 件の著者是正（同日）
+
+- drift.ts:89 → `fold(repo.loadEvents(), repo.loadCorrections())` へ配線（#7 完全化）。
+- store.ts → PATCH_VALUE_CHECKS（patch 値の型形状検証: 数値/Actor/children 配列/文字列・id/kind 混入拒否）を assertCorrectionShape へ追加（#9 完全化。値の意味検証は fold の適用不能経路が担う——正典どおり）。
+- 是正後: CLI 344 passed / tsc clean。多プロセスロックと構造無効 3 例の pre-admission 化は **issue #15（OPEN）** へ deferred（owner nakawodayo・再評価条件つき）。

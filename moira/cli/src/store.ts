@@ -1,5 +1,11 @@
 // .moira/ repository — the per-repo data dir the CLI reads and appends to.
 //   events.json   append-only log of the four events (single source of truth)
+//   corrections.json  v21/v22 §2.10 correction (third) tier — append-only,
+//                 reason-required, targets a first-tier event by id
+//                 (CorrectionNullify | CorrectionPatch). Same "load all →
+//                 append → save all" discipline as dates.json/milestones.json
+//                 below (no latest-wins collapse at the storage layer — that
+//                 happens inside fold, per targetEventId).
 //   capacity.json c(i,d) second tier (CapacityEntry[])
 //   dates.json    deadline / target-date second tier (R-T6 MODEL:233-240;
 //                 append-only, reason-stamped, timestamped — R-U14-isomorphic,
@@ -20,10 +26,11 @@
 //   config.json   projectRoot / me / default asOf / orgCalendar.enabled (#32)
 // Uses the engine's EventStore/CapacityStore for load+save (deterministic order).
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CapacityStore, EventStore } from 'moira-backend';
-import type { CapacityEntry, Event, MilestoneDefinition, NodeId } from 'moira-backend';
+import type { CapacityEntry, Correction, Event, MilestoneDefinition, NodeId } from 'moira-backend';
+import { CliError } from './errors.js';
 
 export interface MoiraConfig {
   projectRoot: string;
@@ -139,9 +146,88 @@ export function resolveMilestones(entries: readonly MilestoneEntry[]): Milestone
   return defs.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function isActorShape(v: unknown): boolean {
+  return isPlainObject(v) && (v.kind === 'human' || v.kind === 'agent') && typeof v.id === 'string';
+}
+
+/**
+ * Lightweight structural check for one corrections.json row (issue #11 #9).
+ * Deliberately NOT full §2.10 validation (patch-field applicability per
+ * target kind is fold's job, surfaced as a structural error at fold-time,
+ * §2.10) — this only guards against a MALFORMED record (missing/mistyped
+ * required keys) reaching fold/derive, where it would otherwise fail with an
+ * opaque TypeError deep in the derivation, or worse, silently coerce into
+ * wrong behavior.
+ */
+/**
+ * patch 値の形状検証（codex 是正確認 PARTIAL #9 の残余）: 値の「意味」の検証は fold の仕事
+ * （適用不能＝可視エラー・§2.10）だが、構造的に成立しない値（children が配列でない等）は
+ * 導出の奥で不透明な TypeError になるため、ここで型形状だけ弾く。
+ */
+const PATCH_VALUE_CHECKS: Record<string, (x: unknown) => boolean> = {
+  amount: (x) => typeof x === 'number' && Number.isFinite(x),
+  ts: (x) => typeof x === 'number' && Number.isFinite(x),
+  frozenBudget: (x) => typeof x === 'number' && Number.isFinite(x),
+  actor: isActorShape,
+  assignee: (x) => x === null || isActorShape(x),
+  reviewer: (x) => x === null || isActorShape(x),
+  children: (x) =>
+    Array.isArray(x) &&
+    x.every((c) => isPlainObject(c) && typeof (c as Record<string, unknown>).node === 'string'),
+  node: (x) => typeof x === 'string',
+  parent: (x) => typeof x === 'string',
+  to: (x) => typeof x === 'string',
+  from: (x) => typeof x === 'string',
+};
+
+function assertCorrectionShape(v: unknown, index: number): asserts v is Correction {
+  const where = `corrections.json[${index}]`;
+  if (!isPlainObject(v)) {
+    throw new CliError(`${where} は object ではありません（corrections.json が壊れています）`);
+  }
+  const required: ReadonlyArray<[string, (x: unknown) => boolean]> = [
+    ['id', (x) => typeof x === 'string'],
+    ['ts', (x) => typeof x === 'number'],
+    ['actor', isActorShape],
+    ['targetEventId', (x) => typeof x === 'string'],
+    ['reason', (x) => typeof x === 'string'],
+  ];
+  for (const [key, check] of required) {
+    if (!check(v[key])) {
+      throw new CliError(`${where}.${key} が欠落または不正です（corrections.json が壊れています）`);
+    }
+  }
+  if (v.correctionKind === 'nullify') return;
+  if (v.correctionKind === 'patch') {
+    if (!isPlainObject(v.patch)) {
+      throw new CliError(
+        `${where}.patch が欠落または不正です（correctionKind='patch' には object の patch が必須）`,
+      );
+    }
+    const p = v.patch as Record<string, unknown>;
+    if ('id' in p || 'kind' in p) {
+      throw new CliError(`${where}.patch に id/kind は含められません（§2.10——同一性は訂正不能）`);
+    }
+    for (const [k, checker] of Object.entries(PATCH_VALUE_CHECKS)) {
+      if (k in p && !checker(p[k])) {
+        throw new CliError(`${where}.patch.${k} の値が不正な形です（corrections.json が壊れています）`);
+      }
+    }
+    return;
+  }
+  throw new CliError(
+    `${where}.correctionKind は 'nullify' か 'patch' のいずれかである必要があります（corrections.json が壊れています）`,
+  );
+}
+
 export class MoiraRepo {
   readonly dir: string;
   readonly eventsPath: string;
+  readonly correctionsPath: string;
   readonly capacityPath: string;
   readonly datesPath: string;
   readonly milestonesPath: string;
@@ -152,6 +238,7 @@ export class MoiraRepo {
   constructor(cwd: string) {
     this.dir = join(cwd, '.moira');
     this.eventsPath = join(this.dir, 'events.json');
+    this.correctionsPath = join(this.dir, 'corrections.json');
     this.capacityPath = join(this.dir, 'capacity.json');
     this.datesPath = join(this.dir, 'dates.json');
     this.milestonesPath = join(this.dir, 'milestones.json');
@@ -167,6 +254,7 @@ export class MoiraRepo {
   init(config: MoiraConfig): void {
     mkdirSync(this.dir, { recursive: true });
     if (!existsSync(this.eventsPath)) writeFileSync(this.eventsPath, '[]\n', 'utf8');
+    if (!existsSync(this.correctionsPath)) writeFileSync(this.correctionsPath, '[]\n', 'utf8');
     if (!existsSync(this.capacityPath)) writeFileSync(this.capacityPath, '[]\n', 'utf8');
     if (!existsSync(this.datesPath)) writeFileSync(this.datesPath, '[]\n', 'utf8');
     if (!existsSync(this.milestonesPath)) writeFileSync(this.milestonesPath, '[]\n', 'utf8');
@@ -193,6 +281,42 @@ export class MoiraRepo {
     if (existsSync(this.eventsPath)) store.loadJson(this.eventsPath);
     store.appendAll(events);
     store.saveJson(this.eventsPath);
+  }
+
+  // --- corrections (v21/v22 §2.10 third tier; append-only, reason-required) ---
+  // No dedicated backend store class (unlike EventStore/CapacityStore) — fold()
+  // takes the raw Correction[] directly, so plain "load all → append → save
+  // all" (dates.json/milestones.json's discipline) is the whole story here.
+  // issue #11 #9: loadCorrections does a lightweight structural check (fails
+  // LOUDLY with a clear CliError on a malformed file, instead of crashing
+  // deep inside fold/derive with an opaque TypeError, or silently feeding
+  // garbage into the correction layer) — NOT full §2.10 applicability
+  // validation, which stays fold's job (a foreign patch key is a visible
+  // structural error at fold-time, not rejected here). appendCorrections
+  // writes via temp-file → rename (atomic replace) so an interrupted write
+  // can never truncate the existing history — the previous direct
+  // writeFileSync could leave a torn/partial JSON file on interruption.
+  loadCorrections(): Correction[] {
+    if (!existsSync(this.correctionsPath)) return [];
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(this.correctionsPath, 'utf8'));
+    } catch (e) {
+      throw new CliError(
+        `corrections.json の読み込みに失敗しました（不正な JSON）: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+    if (!Array.isArray(parsed)) {
+      throw new CliError('corrections.json は配列である必要があります（corrections.json が壊れています）');
+    }
+    parsed.forEach((c, i) => assertCorrectionShape(c, i));
+    return parsed as Correction[];
+  }
+  appendCorrections(recs: readonly Correction[]): void {
+    const all = [...this.loadCorrections(), ...recs];
+    const tmp = `${this.correctionsPath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    writeFileSync(tmp, `${JSON.stringify(all, null, 2)}\n`, 'utf8');
+    renameSync(tmp, this.correctionsPath); // atomic replace — no torn/partial write on interruption
   }
 
   // --- capacity ---
