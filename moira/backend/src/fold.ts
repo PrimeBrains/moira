@@ -326,6 +326,18 @@ function foldEventsOnly(events: readonly Event[]): ProjectedState {
  * repeated error string isn't treated as "already excused" beyond its actual
  * prior count) catches that. Order-independent by design — the base switch's
  * error ordering is a fold-order artifact, not a semantic difference.
+ *
+ * THEORETICAL LIMIT (M-1, issue #15 review): matching is by exact string
+ * content only — the base switch's own error messages don't carry a
+ * per-occurrence identifier (e.g. which event/node produced them), so two
+ * DIFFERENT structural violations that happen to render to byte-identical
+ * text (same guard, same offending node id, same offending value — e.g. two
+ * unrelated cost events both landing on `negative cost -5 on 'A'`) are
+ * indistinguishable to this diff. In that coincidental-collision case a
+ * genuinely NEW occurrence could be matched away against an unrelated
+ * pre-existing one of the same text, under-counting `newErrors` by one. Not
+ * exercised by any current fixture; flagged here rather than silently
+ * assumed away.
  */
 function newStructuralErrors(base: readonly string[], trial: readonly string[]): string[] {
   const remaining = new Map<string, number>();

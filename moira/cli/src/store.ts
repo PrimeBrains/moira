@@ -163,18 +163,33 @@ export function resolveMilestones(entries: readonly MilestoneEntry[]): Milestone
 
 // Bounded — "no silent hang" (moira-verification discipline): a lock that
 // never clears must surface as a loud CliError, not an infinite/near-infinite
-// spin. 15 attempts × 15ms ≈ 225ms worst case — modest, per the task mandate.
-const LOCK_MAX_ATTEMPTS = 15;
-const LOCK_RETRY_DELAY_MS = 15;
-// A held lock older than this is presumed abandoned (its holder crashed
-// without reaching the `finally` unlink) EVEN IF the pid happens to still
-// resolve to a live (but unrelated/reused) process — mtime is the fallback
-// trigger, `process.kill(pid, 0)` liveness is the primary one (see
-// isLockStale below; either alone is sufficient to steal).
+// spin. 30 attempts × 30ms ≈ 900ms worst case — modest for a CLI, and (issue
+// #15 codex review) comfortably outlasts a genuine short-lived contended
+// hold (e.g. a concurrent writer's own load→append→write section), which the
+// original 15×15ms≈225ms budget did not reliably do.
+const LOCK_MAX_ATTEMPTS = 30;
+const LOCK_RETRY_DELAY_MS = 30;
+// issue #15 codex review (Important): a held lock is NEVER stolen purely on
+// age while its recorded pid is confirmed LIVE — a legitimate holder that
+// simply stalls past this threshold (slow disk, GC pause, debugger) must NOT
+// lose its exclusivity; a stolen-then-double-critical-section write would be
+// strictly worse than a stuck CLI invocation. `LOCK_STALE_MS` is therefore
+// used ONLY as the fallback signal for the narrow case where the lock's
+// CONTENT itself cannot establish a pid at all (unreadable/malformed file) —
+// see `isLockStale` below, where pid-liveness is the sole and authoritative
+// signal whenever a pid IS readable.
 const LOCK_STALE_MS = 30_000;
 
 interface LockFileContents {
+  // issue #15 codex review: pid is now the PRIMARY and (whenever readable)
+  // SOLE staleness signal — see isLockStale. Previously a dead field for
+  // staleness purposes (mtime alone decided); no longer.
   pid: number;
+  // Acquire-time wall clock — NOT read back by any staleness/ownership logic
+  // (isLockStale uses pid-liveness/fs-mtime; releaseCorrectionsLock matches
+  // on pid only). Kept purely as an operator-debugging aid: a human
+  // `cat`-ing a stuck `.lock` file mid-incident can see when it was written
+  // without cross-referencing `stat`.
   ts: number;
 }
 
@@ -201,11 +216,34 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-/** Stale iff the recorded holder pid is dead, OR the lock file is older than
- * `LOCK_STALE_MS` — either alone is sufficient (see LOCK_STALE_MS comment).
- * A lock file that has disappeared or is unreadable/malformed by the time we
- * look is treated as "not provably stale, not provably live" → false; the
- * caller's own retry loop naturally re-contends the exclusive create next. */
+/**
+ * Best-effort read of the holder pid recorded in a lock file, for inclusion
+ * in diagnostics (the CliError thrown when the retry budget is exhausted).
+ * `undefined` on any failure (gone/unreadable/malformed/wrong-shaped) —
+ * callers render that as "unknown", never as a false claim.
+ */
+function readLockHolderPid(lockPath: string): number | undefined {
+  try {
+    const parsed = JSON.parse(readFileSync(lockPath, 'utf8')) as Partial<LockFileContents>;
+    return typeof parsed.pid === 'number' ? parsed.pid : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Stale iff the recorded holder pid is CONFIRMED DEAD (ESRCH) — the ONLY
+ * steal trigger whenever a pid can be read at all (issue #15 codex review,
+ * Important: a live pid is NEVER stolen from, no matter how old the lock
+ * file's mtime — see LOCK_STALE_MS's own comment for why). `LOCK_STALE_MS`
+ * is consulted ONLY when the lock's pid cannot be established in the first
+ * place (unreadable file, malformed JSON, non-numeric/missing `pid`) — in
+ * that narrow case there is no liveness signal to check at all, so age is
+ * the only available fallback for "this looks abandoned, not merely busy".
+ * A lock file that has disappeared by the time we look is treated as "not
+ * provably stale, not provably live" → false; the caller's own retry loop
+ * naturally re-contends the exclusive create next.
+ */
 function isLockStale(lockPath: string): boolean {
   let raw: string;
   try {
@@ -218,11 +256,11 @@ function isLockStale(lockPath: string): boolean {
     const parsed = JSON.parse(raw) as Partial<LockFileContents>;
     if (typeof parsed.pid === 'number') holderPid = parsed.pid;
   } catch {
-    // malformed content — fall through to the mtime check alone
+    // malformed content — pid unknowable; fall through to the mtime-only path below
   }
-  if (holderPid !== undefined && !isProcessAlive(holderPid)) return true;
+  if (holderPid !== undefined) return !isProcessAlive(holderPid); // pid known — this is the ENTIRE verdict, live or dead
   try {
-    return Date.now() - statSync(lockPath).mtimeMs > LOCK_STALE_MS;
+    return Date.now() - statSync(lockPath).mtimeMs > LOCK_STALE_MS; // pid unknowable — age is the only signal left
   } catch {
     return false;
   }
@@ -417,56 +455,184 @@ export class MoiraRepo {
     return `${this.correctionsPath}.lock`;
   }
 
-  /**
-   * Acquire the corrections.json advisory lock (issue #15). Exclusive create
-   * (`wx`) is the actual mutual-exclusion primitive — two processes racing
-   * to create the same path can never both succeed. On contention (EEXIST):
-   * check whether the CURRENT holder looks abandoned (`isLockStale`) and, if
-   * so, steal it (unlink) so the NEXT attempt's exclusive create can win;
-   * either way, back off briefly and retry, bounded by LOCK_MAX_ATTEMPTS —
-   * exhausting the budget is a loud CliError, never a silent pass-through
-   * (a caller that ignored the lock would reintroduce the exact lost-update
-   * this exists to prevent).
-   */
-  private acquireCorrectionsLock(): void {
-    const lockPath = this.correctionsLockPath;
-    for (let attempt = 1; attempt <= LOCK_MAX_ATTEMPTS; attempt += 1) {
-      try {
-        const contents: LockFileContents = { pid: process.pid, ts: Date.now() };
-        writeFileSync(lockPath, JSON.stringify(contents), { flag: 'wx' });
-        return; // acquired
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e; // unexpected fs error — surface as-is
-        if (isLockStale(lockPath)) {
-          try {
-            unlinkSync(lockPath); // best-effort steal; a concurrent stealer racing us just re-contends below
-          } catch {
-            // already gone (another process stole/released it first) — fine
-          }
-        }
-        if (attempt === LOCK_MAX_ATTEMPTS) {
-          throw new CliError(
-            `corrections.json の書き込みロックを取得できませんでした（他のプロセスが処理中の可能性があります: ${lockPath}）`,
-          );
-        }
-        sleepSync(LOCK_RETRY_DELAY_MS);
-      }
+  /** One non-blocking attempt at the exclusive create. `true` = acquired. */
+  private tryCreateLock(lockPath: string): boolean {
+    try {
+      const contents: LockFileContents = { pid: process.pid, ts: Date.now() };
+      writeFileSync(lockPath, JSON.stringify(contents), { flag: 'wx' });
+      return true;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e; // unexpected fs error — surface as-is
+      return false;
     }
   }
 
   /**
-   * Unlink the lock ONLY if it is still stamped with OUR pid. A plain
-   * unconditional unlink would be wrong: if THIS holder stalled past
-   * LOCK_STALE_MS mid-critical-section, another writer may have already
-   * judged the lock stale, stolen it (unlink + recreate under ITS OWN pid),
-   * and be in ITS OWN critical section right now — an unconditional unlink
-   * here would delete THAT LIVE lock out from under it (re-opening exactly
-   * the lost-update window this mechanism exists to close), not a harmless
-   * no-op on an already-gone file. Re-reading and pid-matching before
-   * unlinking closes that cross-delete, though the read-then-unlink pair is
-   * itself not atomic (a classic advisory-lock TOCTOU) — an extremely
-   * narrow residual race remains if a steal lands in that exact window; this
-   * is a best-effort mutual-exclusion guard, not a linearizable lock.
+   * Best-effort steal of an apparently-abandoned (per `isLockStale` —
+   * confirmed-dead-pid, or unreadable+aged) lock, called only after a
+   * `tryCreateLock` EEXIST. issue #15 codex review (Critical): stealing via
+   * a plain `unlinkSync(lockPath)` was UNSAFE — between `isLockStale`'s own
+   * read and the unlink, another writer racing us could already have judged
+   * the SAME lock stale, stolen it FIRST (taking ownership under its OWN
+   * pid), and be inside its OWN live critical section by the time our
+   * unlink runs — deleting that LIVE lock, not a phantom, and opening a
+   * double-critical-section window (the exact lost-update this mechanism
+   * exists to prevent).
+   *
+   * Fix: steal via ATOMIC RENAME, never unlink. `renameSync(lockPath,
+   * claimPath)` is a single atomic filesystem operation — if two writers
+   * race to rename the SAME `lockPath` to their own distinct `claimPath`s,
+   * the OS serializes them: exactly one succeeds (physically taking
+   * `lockPath`'s current content away), and the other gets ENOENT (because
+   * `lockPath` no longer exists under that name by the time its rename
+   * runs) and simply falls through to ordinary re-contention on its next
+   * loop iteration — it NEVER touches the winner's `claimPath`, and (this is
+   * the key correctness property) on its NEXT `isLockStale` check it
+   * re-reads whatever is CURRENTLY at `lockPath` from scratch, so it never
+   * acts on stale information about a lock instance it no longer has any
+   * claim to. Only the rename's WINNER ever gets to decide what happens to
+   * the file it captured.
+   *
+   * After winning the rename, the content is RE-VERIFIED (not just trusted
+   * from the pre-rename `isLockStale` read) before being discarded: if the
+   * captured file's pid is confirmed dead, it is genuinely ours to delete —
+   * `unlinkSync(claimPath)` (a uniquely-named path only this call knows, so
+   * this unlink can never collide with anyone else's file) — and the caller
+   * then re-contends `lockPath` via an ordinary `tryCreateLock`.
+   *
+   * HONEST RESIDUAL — the LIVE-capture case is NOT safely resolved, and this
+   * is NOT claimed to close the race, only to narrow it from a common 2-party
+   * shape to a rare 3-party one. If the captured content instead shows a LIVE
+   * pid — meaning the narrow interleaving above happened (someone else
+   * legitimately stole AND recreated a fresh live lock inside the gap
+   * between our `isLockStale` read and this `renameSync`) — this call does
+   * NOT unlink it (that would be the original Critical bug all over again)
+   * and does NOT try to hand it back (no atomic primitive exists here to do
+   * so safely, and a naive rename-back could itself clobber whatever a THIRD
+   * party has since created at `lockPath`). It abandons the captured file in
+   * place (parked under its unique claimPath — inert, never looked up again,
+   * a permanent small leak on this exact rare path) and returns. BUT: by
+   * this point `renameSync` has ALREADY vacated `lockPath` — this function
+   * cannot undo that. The caller (`acquireCorrectionsLock`) does NOT know a
+   * live lock was just displaced and has no signal telling it to stand down;
+   * on its very NEXT loop iteration, its own `tryCreateLock(lockPath)` will
+   * see an empty path and SUCCEED, entering ITS OWN critical section
+   * concurrently with the live holder this call just displaced — the same
+   * double-critical-section shape the rename fix exists to prevent, just
+   * relocated to one syscall later and gated behind a ≥3-way interleaving
+   * (rather than the 2-party race that triggered on every ordinary steal
+   * before this fix). The displaced holder itself is not corrupted by any of
+   * this — its own `releaseCorrectionsLock` pid-guard simply no-ops when it
+   * can no longer find its lock — but exclusivity between it and whoever
+   * grabs the vacated `lockPath` next is not preserved. Plain POSIX
+   * rename/unlink offer no compare-and-swap primitive that would close this
+   * outright; this is a best-effort advisory lock, not a linearizable one,
+   * and this comment does not claim otherwise. NOT exercised by any current
+   * test (reaching it needs the same ≥3-way interleaving) — reasoned, not
+   * verified.
+   */
+  private tryStealIfStale(lockPath: string): void {
+    if (!isLockStale(lockPath)) return;
+    const claimPath = `${lockPath}.steal-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    try {
+      renameSync(lockPath, claimPath); // atomic — losers of this race get ENOENT and fall through to ordinary re-contention
+    } catch {
+      return; // lost the steal race, or lockPath was already gone — nothing captured, nothing to do
+    }
+    // We now hold EXCLUSIVE possession of whatever was at `lockPath` — no
+    // one else can also have captured it. Re-verify before acting on it.
+    const capturedPid = readLockHolderPid(claimPath);
+    const capturedIsDead = capturedPid !== undefined && !isProcessAlive(capturedPid);
+    if (capturedPid === undefined || capturedIsDead) {
+      // Genuinely stale (or unreadable — same disposition as isLockStale's
+      // own unreadable/malformed fallback: treat as abandoned) — safe to
+      // discard; the caller's next tryCreateLock re-contends `lockPath` cleanly.
+      try {
+        unlinkSync(claimPath);
+      } catch {
+        // already gone somehow — nothing left to clean up
+      }
+      return;
+    }
+    // capturedPid is LIVE — we accidentally captured a legitimate fresh lock
+    // via the narrow race documented above. Do NOT unlink it (see this
+    // function's doc comment — that would repeat the original Critical bug)
+    // and do NOT try to hand it back (no safe atomic primitive for that
+    // here). Abandon it, parked at claimPath, permanently orphaned. This
+    // does NOT prevent the caller's OWN next tryCreateLock from succeeding
+    // at the now-vacated lockPath and colliding with the displaced live
+    // holder — see the doc comment's HONEST RESIDUAL for the un-closed part
+    // of this race. There is no cheaper correct move available with plain
+    // POSIX rename/unlink.
+  }
+
+  /**
+   * Acquire the corrections.json advisory lock (issue #15). Exclusive create
+   * (`wx`, via `tryCreateLock`) is the actual mutual-exclusion primitive —
+   * two processes racing to create the same path can never both succeed. On
+   * contention (EEXIST): attempt a rename-based steal of an abandoned lock
+   * (`tryStealIfStale` — see its own doc comment for the full design and its
+   * honest residual), then back off briefly and retry, bounded by
+   * LOCK_MAX_ATTEMPTS — exhausting the budget is a loud CliError, never a
+   * silent pass-through (a caller that ignored the lock would reintroduce
+   * the exact lost-update this exists to prevent). The error names the lock
+   * path and the (best-effort) current holder pid, and reads as operator
+   * guidance: since a LIVE holder's lock is now never auto-stolen (see
+   * LOCK_STALE_MS's comment), a wedged-but-alive holder genuinely requires a
+   * human to intervene — this is not something the retry loop can resolve
+   * for itself, and the message says so rather than implying it will
+   * eventually clear on its own. M-2 (issue #15 review): a steal that lands
+   * on the FINAL budgeted attempt would otherwise be wasted — we'd throw
+   * despite having just cleared the contention ourselves — so the last
+   * attempt gets one immediate extra `tryCreateLock` before giving up.
+   */
+  private acquireCorrectionsLock(): void {
+    const lockPath = this.correctionsLockPath;
+    for (let attempt = 1; attempt <= LOCK_MAX_ATTEMPTS; attempt += 1) {
+      if (this.tryCreateLock(lockPath)) return;
+      this.tryStealIfStale(lockPath);
+      if (attempt === LOCK_MAX_ATTEMPTS) {
+        if (this.tryCreateLock(lockPath)) return; // M-2: cash in a steal that just happened on this final attempt
+        const holderPid = readLockHolderPid(lockPath);
+        throw new CliError(
+          `corrections.json の書き込みロックを取得できませんでした（${lockPath}` +
+            (holderPid !== undefined ? `, 保持プロセス pid=${holderPid}` : ', 保持プロセス pid 不明') +
+            `）。保持プロセスが生存している場合、自動では解除されません——処理の完了を待つか、` +
+            `そのプロセスが実際には停止していることを確認したうえで、ロックファイルを手動で削除してください。`,
+        );
+      }
+      sleepSync(LOCK_RETRY_DELAY_MS);
+    }
+  }
+
+  /**
+   * Unlink the lock ONLY if it is still stamped with OUR pid — never
+   * unconditionally.
+   *
+   * issue #15 codex review (residual re-evaluated after the Critical
+   * rename-based-steal fix above): now that `tryStealIfStale` NEVER steals a
+   * lock whose recorded pid is confirmed LIVE — regardless of the lock
+   * file's age — the "our live lock gets stolen out from under us" pathway
+   * this guard originally defended against is CLOSED under ordinary
+   * operation. As long as THIS process is alive, `process.kill(ourPid, 0)`
+   * reports it alive to any prospective stealer, and `isLockStale` returns
+   * false for it — nothing steals it. The old "held past 30s ⇒ eligible for
+   * steal even if alive" framing no longer applies; that was the exact bug
+   * this round's Important fix removed.
+   *
+   * The only theoretical residual is OS PID REUSE: if this process were to
+   * die WITHOUT reaching this `finally` block (not reachable via this
+   * function's own normal control flow — this function only ever runs
+   * inside a `finally` — but conceivable under e.g. SIGKILL or a host
+   * crash), its pid becomes free; if the OS then reassigns that EXACT pid
+   * to an unrelated new process before any stealer re-checks, the stealer
+   * would (correctly, per the information available to it) see a live
+   * process at that pid and hold off. This is an AVAILABILITY hiccup for the
+   * abandoned lock (it stays parked until someone manually clears it or the
+   * reused pid itself exits) — not a correctness violation; nothing gets
+   * double-written. This guard's own pid-match is retained regardless, as
+   * defense in depth against future changes to the steal path, not because
+   * a live-steal is currently reachable.
    */
   private releaseCorrectionsLock(): void {
     let owned = false;
@@ -492,7 +658,19 @@ export class MoiraRepo {
       const all = [...this.loadCorrections(), ...recs];
       const tmp = `${this.correctionsPath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       writeFileSync(tmp, `${JSON.stringify(all, null, 2)}\n`, 'utf8');
-      renameSync(tmp, this.correctionsPath); // atomic replace — no torn/partial write on interruption
+      try {
+        renameSync(tmp, this.correctionsPath); // atomic replace — no torn/partial write on interruption
+      } catch (e) {
+        // issue #15 codex review (Minor): a failed rename must not leak the
+        // temp file — best-effort cleanup, then surface the ORIGINAL error
+        // (the temp-file removal itself is not the interesting failure).
+        try {
+          unlinkSync(tmp);
+        } catch {
+          // couldn't clean up either — nothing more we can do here
+        }
+        throw e;
+      }
     } finally {
       this.releaseCorrectionsLock();
     }

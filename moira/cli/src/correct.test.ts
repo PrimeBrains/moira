@@ -14,7 +14,7 @@
 //   - `moira log` prints each event's id (target discovery, no --json needed)
 //   - report reflection: correctionMeter goes non-zero after a correct
 
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   existsSync,
   mkdtempSync,
@@ -179,24 +179,34 @@ describe('MoiraRepo corrections.json (append-only third tier — issue #11 R7)',
       expect(files.some((f) => f.includes('.tmp-'))).toBe(false); // no leftover temp file either
     });
 
-    it('a lock held by a LIVE pid blocks a writer through the retry budget, then throws CliError — no partial/lost write', () => {
+    it('a lock held by a LIVE pid (fresh mtime) blocks a writer through the retry budget, then throws a diagnostic CliError — no partial/lost write', () => {
       const repo = new MoiraRepo(tmp);
       repo.init({ projectRoot: 'p', me: 'me' });
       const lockPath = `${repo.correctionsPath}.lock`;
       // Our own test process — guaranteed alive — holds the lock, freshly
-      // timestamped (so neither the pid-liveness nor the mtime staleness
-      // trigger clears it).
+      // timestamped.
       writeFileSync(lockPath, JSON.stringify({ pid: process.pid, ts: Date.now() }), 'utf8');
       const t0 = Date.now();
-      expect(() =>
+      let caught: unknown;
+      try {
         repo.appendCorrections([
           { id: 'c1', ts: 1, actor: { kind: 'human', id: 'me' }, targetEventId: 'e1', reason: 'r', correctionKind: 'nullify' },
-        ]),
-      ).toThrow(CliError);
+        ]);
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(CliError);
       const elapsedMs = Date.now() - t0;
       // Proves it actually RETRIED with backoff rather than failing instantly
       // (an immediate single-attempt failure would be well under 10ms).
       expect(elapsedMs).toBeGreaterThan(50);
+      // The error is diagnostic — names the lock path and the (still-live)
+      // holder pid, and reads as operator guidance (issue #15 codex review:
+      // a live-but-wedged holder is never auto-resolved, so the message must
+      // say so rather than imply automatic recovery).
+      const message = (caught as Error).message;
+      expect(message).toContain(lockPath);
+      expect(message).toContain(String(process.pid));
       // No lost/partial write — corrections.json is untouched (still the
       // init-seeded empty array), and the (still-live) lock is left in place
       // (this call never acquired it, so it must not delete someone else's
@@ -205,7 +215,28 @@ describe('MoiraRepo corrections.json (append-only third tier — issue #11 R7)',
       expect(existsSync(lockPath)).toBe(true);
     });
 
-    it('a lock held by a DEAD pid is treated as stale and taken over — the append still succeeds', () => {
+    // issue #15 codex review (Important): even a very OLD lock file must NOT
+    // be stolen while its recorded pid is confirmed LIVE — this pins the
+    // corrected spec (previously mtime-age alone was sufficient to steal,
+    // which could strip exclusivity from a legitimate holder merely stalled
+    // past LOCK_STALE_MS; that was the flaw this fix removes).
+    it('a lock held by a LIVE pid is NOT stolen even when its mtime is far past the staleness threshold', () => {
+      const repo = new MoiraRepo(tmp);
+      repo.init({ projectRoot: 'p', me: 'me' });
+      const lockPath = `${repo.correctionsPath}.lock`;
+      writeFileSync(lockPath, JSON.stringify({ pid: process.pid, ts: Date.now() }), 'utf8');
+      const old = new Date(Date.now() - 60_000); // well past LOCK_STALE_MS
+      utimesSync(lockPath, old, old);
+      expect(() =>
+        repo.appendCorrections([
+          { id: 'c1', ts: 1, actor: { kind: 'human', id: 'me' }, targetEventId: 'e1', reason: 'r', correctionKind: 'nullify' },
+        ]),
+      ).toThrow(CliError); // NOT admitted — age alone never overrides pid-liveness
+      expect(repo.loadCorrections()).toEqual([]);
+      expect(existsSync(lockPath)).toBe(true); // the live holder's lock survives untouched
+    });
+
+    it('a lock held by a DEAD pid is treated as stale and taken over (via the rename-based steal) — the append still succeeds', () => {
       const repo = new MoiraRepo(tmp);
       repo.init({ projectRoot: 'p', me: 'me' });
       const lockPath = `${repo.correctionsPath}.lock`;
@@ -223,21 +254,109 @@ describe('MoiraRepo corrections.json (append-only third tier — issue #11 R7)',
       ).not.toThrow();
       expect(repo.loadCorrections().map((c) => c.id)).toEqual(['c1']);
       expect(existsSync(lockPath)).toBe(false); // released after the (stolen-then-used) critical section
+      // No orphaned `.steal-*` artifact left behind on the (expected, clean) path.
+      const leftovers = readdirSync(join(tmp, '.moira')).filter((f) => f.includes('.steal-'));
+      expect(leftovers).toEqual([]);
     });
 
-    it('a stale-by-AGE lock (old mtime, even with a live pid) is also taken over', () => {
+    // issue #15 codex review (Important): a real cross-process exclusion
+    // witness. The prior two-MoiraRepo-instance test above is entirely
+    // sequential (single Node process) and would still pass even with the
+    // lock mechanism deleted outright — it does not prove mutual exclusion
+    // under GENUINE overlap. This test spawns a REAL separate OS process
+    // that follows the exact same lock protocol (wx-create the lockfile
+    // under its own pid, read corrections.json, hold for a real wall-clock
+    // interval, append its own record via temp→rename, then unlink the
+    // lockfile) while the PARENT concurrently calls `appendCorrections`.
+    // The parent's call is synchronous and will block on retries for as
+    // long as the child holds the lock — but the child is a genuinely
+    // independent OS process, so it keeps running (and eventually releases)
+    // regardless of the parent's own event loop being blocked. If the lock
+    // did nothing, the parent's `[...load, ...append]` would race the
+    // child's and one record would be lost; asserting BOTH records survive
+    // is the lost-update witness.
+    it('a real child OS process holding the lock blocks the parent, which then succeeds once the child releases — BOTH records survive', async () => {
       const repo = new MoiraRepo(tmp);
       repo.init({ projectRoot: 'p', me: 'me' });
       const lockPath = `${repo.correctionsPath}.lock`;
-      writeFileSync(lockPath, JSON.stringify({ pid: process.pid, ts: Date.now() }), 'utf8');
-      const old = new Date(Date.now() - 60_000); // well past the staleness threshold
-      utimesSync(lockPath, old, old);
-      expect(() =>
-        repo.appendCorrections([
-          { id: 'c1', ts: 1, actor: { kind: 'human', id: 'me' }, targetEventId: 'e1', reason: 'r', correctionKind: 'nullify' },
-        ]),
-      ).not.toThrow();
-      expect(repo.loadCorrections().map((c) => c.id)).toEqual(['c1']);
+      const correctionsPath = repo.correctionsPath;
+      const HOLD_MS = 150; // comfortably under the ~900ms parent retry budget, comfortably over spawn overhead
+      const childScript = [
+        "const fs = require('fs');",
+        `const lockPath = ${JSON.stringify(lockPath)};`,
+        `const correctionsPath = ${JSON.stringify(correctionsPath)};`,
+        // (1) acquire — same wx-create protocol as the real implementation
+        "fs.writeFileSync(lockPath, JSON.stringify({ pid: process.pid, ts: Date.now() }), { flag: 'wx' });",
+        // (2) read
+        'const existing = JSON.parse(fs.readFileSync(correctionsPath, "utf8"));',
+        // (3) hold — real wall-clock delay in a SEPARATE OS process
+        `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${HOLD_MS});`,
+        // (4) append + temp->rename, same discipline as MoiraRepo.appendCorrections
+        'const rec = { id: "child-c", ts: 999, actor: { kind: "human", id: "child" }, targetEventId: "e-child", reason: "from child process", correctionKind: "nullify" };',
+        'const all = [...existing, rec];',
+        'const tmp = correctionsPath + ".tmp-child-" + process.pid;',
+        'fs.writeFileSync(tmp, JSON.stringify(all, null, 2) + "\\n", "utf8");',
+        'fs.renameSync(tmp, correctionsPath);',
+        // (5) release
+        'fs.unlinkSync(lockPath);',
+      ].join('\n');
+      const child = spawn(process.execPath, ['-e', childScript]);
+      const childExit = new Promise<number | null>((resolve, reject) => {
+        child.on('error', reject);
+        child.on('exit', (code) => resolve(code));
+      });
+
+      // Wait for the child to actually have the lock before the parent
+      // races it — otherwise the parent could slip in first and this test
+      // would degenerate into the purely-sequential case.
+      const deadline = Date.now() + 2000;
+      while (!existsSync(lockPath)) {
+        if (Date.now() > deadline) throw new Error('child never created the lockfile — test setup failed');
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+      }
+
+      // Parent races the child — this call is synchronous and will block
+      // (retrying) for as long as the child holds the lock.
+      repo.appendCorrections([
+        { id: 'parent-c', ts: 1, actor: { kind: 'human', id: 'me' }, targetEventId: 'e-parent', reason: 'r', correctionKind: 'nullify' },
+      ]);
+
+      const exitCode = await childExit;
+      expect(exitCode).toBe(0);
+
+      const ids = repo.loadCorrections().map((c) => c.id).sort();
+      expect(ids).toEqual(['child-c', 'parent-c']); // BOTH survive — no lost update
+      expect(existsSync(lockPath)).toBe(false); // whichever ran last released cleanly
+    }, 10000);
+
+    // issue #15 kiro-review I-3 (Important): the pid-guard's TWO branches in
+    // `releaseCorrectionsLock` (own-pid → delete; other-pid → leave alone —
+    // the fix for the cross-delete race the review flagged) are both
+    // reachable and testable IN A SINGLE PROCESS via the private method
+    // directly. This does NOT exercise the acquire-side steal/retry path
+    // (those are the tests above) — it isolates release's OWN ownership
+    // check.
+    describe('releaseCorrectionsLock pid-guard (issue #15 review I-3 — testable in-process via the private seam)', () => {
+      it('leaves the lockfile in place when it is stamped with a DIFFERENT pid (not ours to delete)', () => {
+        const repo = new MoiraRepo(tmp);
+        repo.init({ projectRoot: 'p', me: 'me' });
+        const lockPath = `${repo.correctionsPath}.lock`;
+        const other = spawnSync(process.execPath, ['-e', '0']); // any pid other than ours — dead or alive doesn't matter to this guard, which only compares pid values
+        writeFileSync(lockPath, JSON.stringify({ pid: other.pid, ts: Date.now() }), 'utf8');
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (repo as any).releaseCorrectionsLock();
+        expect(existsSync(lockPath)).toBe(true); // NOT ours — must survive
+      });
+
+      it('deletes the lockfile when it is stamped with OUR OWN pid', () => {
+        const repo = new MoiraRepo(tmp);
+        repo.init({ projectRoot: 'p', me: 'me' });
+        const lockPath = `${repo.correctionsPath}.lock`;
+        writeFileSync(lockPath, JSON.stringify({ pid: process.pid, ts: Date.now() }), 'utf8');
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (repo as any).releaseCorrectionsLock();
+        expect(existsSync(lockPath)).toBe(false); // ours — released
+      });
     });
   });
 });

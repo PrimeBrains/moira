@@ -1192,6 +1192,61 @@ describe('§2.10 issue #15 ② cost value-correction that would set a negative a
     expect(state.correctionMeter.inapplicable).toBe(0);
     expect(state.structuralErrors.some((e) => e.startsWith('A6/§2.8'))).toBe(false);
   });
+
+  // issue #15 kiro-review I-2 (Important): non-vacuity witness for the
+  // MULTISET diff, not just "diff exists". A weakened implementation that
+  // compared ERROR COUNTS instead of error CONTENT (`trial.length >
+  // base.length`) would pass every OTHER test in this file — none of them
+  // separately exercises "same count, different content". This fixture
+  // does: the RAW log already contains ONE negative-cost structural error
+  // (amount -5, from the uncorrected event itself — no correction involved
+  // yet). The correction re-patches the SAME target to a DIFFERENT negative
+  // amount (-3). The trial fold therefore ALSO produces exactly one
+  // negative-cost error — same COUNT (1) — but its text differs ("-5" vs
+  // "-3"), because the offending amount is embedded in the message. A
+  // count-only comparison would see 1→1 and wrongly ADMIT this correction
+  // (masking that -3 is still just as invalid as -5); only a CONTENT
+  // (multiset) diff sees "-3" as an error that was never present in the
+  // base and correctly rejects it.
+  it('a patch that trades one negative amount for a different negative amount is inapplicable (multiset, not count, diff — issue #15 review I-2)', () => {
+    const events: Event[] = [
+      ...new Log().decompose('F', [{ node: 'A', estimate: 3 }]).all(), // t001
+      { kind: 'cost', id: 't002', ts: 2, actor: human('h1'), node: 'A', amount: -5 }, // raw negative — already 1 base-switch error
+    ];
+    // Sanity: the raw (uncorrected) log already carries exactly one
+    // negative-cost structural error — this is preState's baseline.
+    const uncorrected = fold(events);
+    expect(uncorrected.structuralErrors.filter((e) => e.startsWith('A6/§2.8'))).toHaveLength(1);
+    expect(uncorrected.structuralErrors.some((e) => e.includes('-5'))).toBe(true);
+
+    const corrections: Correction[] = [
+      {
+        id: 'c1',
+        ts: 1000,
+        actor: human('h1'),
+        targetEventId: 't002',
+        reason: 'value correction — actually the amount was -3, not -5 (still a mistaken sign)',
+        correctionKind: 'patch',
+        patch: { amount: -3 },
+      },
+    ];
+    const state = fold(events, corrections);
+    // Rejected: count-only (1→1) would have missed this; content-diff catches it.
+    expect(state.correctionMeter.total).toBe(1);
+    expect(state.correctionMeter.inapplicable).toBe(1);
+    // Cost never applied under EITHER reading (both are negative) — ownCost stays 0.
+    expect(state.nodes.get('A')?.ownCost).toBe(0);
+    // The ORIGINAL reading (-5) is what actually re-fires in the real
+    // (non-trial) fold of the untouched event — visible, not "-3".
+    expect(state.structuralErrors.some((e) => e.includes('-5') && e.startsWith('A6/§2.8'))).toBe(
+      true,
+    );
+    // The rejection itself is reported via the §2.10 wrapper citing the
+    // trial's divergent (-3) reading — the reason THIS record was refused.
+    expect(state.structuralErrors.some((e) => e.includes('§2.10') && e.includes('-3'))).toBe(
+      true,
+    );
+  });
 });
 
 describe('§2.10 issue #15 ③ relate endpoint-correction that would create a cycle', () => {
