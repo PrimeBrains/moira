@@ -1011,12 +1011,75 @@ describe('§2.8 (v21) release sentinel — assignee/reviewer explicit un-assignm
 // switch's OWN rejection at fold-time, which — unlike this pre-admission gate
 // — does NOT keep the prior valid reading in force (it just drops the target
 // into a rejected-by-base-switch state, same shape as an ordinary bad EVENT,
-// with `inapplicable` left at 0). issue #15 closes that gap: each candidate
-// is now run through a TRIAL fold (would-be-apply against the real base
-// switch) before it is ever set as a target's winner, and rejected —
+// with `inapplicable` left at 0). issue #15 closes that gap: each PATCH
+// candidate is now run through a TRIAL fold (would-be-apply against the real
+// base switch) before it is ever set as a target's winner, and rejected —
 // pre-admission, `inapplicable` incremented, prior valid reading preserved —
-// if doing so introduces a NEW structural error anywhere in the log.
+// if doing so introduces a NEW structural error anywhere in the log. This
+// gate is PATCH-ONLY (issue #15 fork F1 human ruling, 2026-07-23) — nullify
+// is DELIBERATELY exempt; see the describe block immediately below for the
+// witness proving nullify instead.
 // ---------------------------------------------------------------------------
+
+// issue #15 fork F1 human ruling (2026-07-23, MODEL §2.5 "cancelled の終端性
+// と訂正" doctrine — 誤記表明 applies the removal and re-derives the REMAINING
+// sequence under unchanged first-tier semantics, with residual inconsistency
+// left as a VISIBLE derived result for a human to address via further
+// correction or compensation, NOT pre-rejected): unlike the three PATCH
+// examples above, a nullify is never trial-folded — it is ALWAYS admitted,
+// and any downstream structural fallout from applying it surfaces as an
+// ordinary (unwrapped) base-switch error on the real, final fold, exactly as
+// if a human had simply deleted the event and re-run the log by hand.
+// Scenario is the independent-review I-1 proof case reused verbatim per the
+// coordinator's instruction: t1 decompose A→[B], t2 decompose C→[B], t3
+// decompose B→[A]; nullifying t2.
+describe('§2.10 issue #15 fork F1: nullify is exempt from trial-fold — it is applied and its structural fallout surfaces visibly', () => {
+  it('nullifying t2 is ADMITTED even though it makes t3 newly trip the containment-cycle guard — the cycle error is VISIBLE, not a §2.10-wrapped rejection', () => {
+    const events: Event[] = new Log()
+      .decompose('A', [{ node: 'B' }]) // t001: B.parent = A
+      .decompose('C', [{ node: 'B' }]) // t002: B.parent = C (latest-wins replace, no cycle at the time)
+      .decompose('B', [{ node: 'A' }]) // t003: as-logged, A.parent = B — no cycle either, since B's parent is C, not A
+      .all();
+    // Nullifying t002 removes B's re-parenting to C — under the corrected
+    // read, t003 replays against B's ORIGINAL parent (A, from t001), and
+    // "decompose B → [A]" now tries to make A a child of its own child B —
+    // a genuine containment cycle that did NOT exist in the original log.
+    const corrections: Correction[] = [
+      {
+        id: 'c1',
+        ts: 1000,
+        actor: human('h1'),
+        targetEventId: 't002',
+        reason: '誤記表明 — t002 was entered against the wrong parent',
+        correctionKind: 'nullify',
+      },
+    ];
+    const state = fold(events, corrections);
+    // Admitted: not inapplicable, counted in ① only.
+    expect(state.correctionMeter.total).toBe(1);
+    expect(state.correctionMeter.inapplicable).toBe(0);
+    // Applied: t002 is genuinely gone from the effective stream.
+    const { effective } = __test_applyCorrections(events, corrections);
+    expect(effective.some((e) => e.id === 't002')).toBe(false);
+    expect(effective.some((e) => e.id === 't001')).toBe(true);
+    expect(effective.some((e) => e.id === 't003')).toBe(true);
+    // Re-derived from the REMAINING sequence under unchanged semantics: B's
+    // parent is A (t001, since t002 is gone), and t003's attempt to make A a
+    // child of B is REJECTED by the ordinary tree-ness guard (A stays root).
+    expect(state.nodes.get('B')?.parent).toBe('A');
+    expect(state.nodes.get('A')?.parent).toBeNull();
+    // The fallout is VISIBLE — a plain base-switch error, exactly the same
+    // shape as if a human had hand-edited the log and re-run it, NOT a
+    // §2.10-wrapped inapplicable-correction message (nullify was never
+    // trial-folded, so there was nothing to wrap or reject).
+    expect(
+      state.structuralErrors.some(
+        (e) => e.startsWith('A3/§2.8') && e.includes('containment cycle'),
+      ),
+    ).toBe(true);
+    expect(state.structuralErrors.some((e) => e.includes('§2.10'))).toBe(false);
+  });
+});
 
 describe('§2.10 issue #15 ① decompose value-correction that would move a parent onto its own descendant (containment cycle)', () => {
   it('a patch that moves the effective parent into the child’s own subtree is inapplicable; the original decompose stays in force', () => {

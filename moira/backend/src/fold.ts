@@ -176,27 +176,38 @@ function mergePatch(
  * reading entirely, rather than leaving it in force. §2.10's own inapplicable
  * contract ("先行する有効な訂正が現行のまま残る") requires the latter.
  *
- * SCOPE NOTE: §2.10 (i) lists FOUR "検証の迂回は不能" worked examples — a
- * containment-cycle decompose patch, a negative-amount cost patch, a
- * cycle-creating relate-endpoint patch, and THIS ONE (non-human agreed
- * actor). This fourth example gets its own LOCAL pre-admission check here
- * (cheap — a single-field predicate over the merged event, no replay needed)
- * because it was the one issue #11 gate-2 R2 #2's actor-unlock newly made
- * reachable (mergePatch used to always skip `actor`, so it was unreachable
- * before). The other three used to be a PRE-EXISTING gap — they flowed into
- * `winnerByTarget` and relied on the base switch's own rejection at
- * fold-time, which (per the reasoning above) does NOT give the same "prior
- * valid reading stays in force" guarantee. issue #15 closed that gap: every
- * admission candidate that survives this function's local check (and, for a
- * patch, the foreign-field check) is now ALSO run through a trial fold in
- * `applyCorrections` (see the "trial fold" block there) that would-be-applies
- * it against the REAL base switch and rejects it, pre-admission, if doing so
- * introduces any NEW structural error anywhere in the log — decompose
- * containment cycles and negative-amount costs included, by walking the
- * ordinary `applyDecompose`/`applyCost` switch cases, not by a bespoke
- * duplicate check here. This function stays a narrow, cheap, LOCAL predicate
- * for the one case that doesn't need a full replay to decide (a single-field
- * check is exact); it is not itself broadened to cover the other three.
+ * SCOPE NOTE: §2.10 (i) lists FOUR "検証の迂回は不能" worked examples, ALL OF
+ * THEM PATCHES — a containment-cycle decompose patch, a negative-amount cost
+ * patch, a cycle-creating relate-endpoint patch, and THIS ONE (non-human
+ * agreed actor). This fourth example gets its own LOCAL pre-admission check
+ * here (cheap — a single-field predicate over the merged event, no replay
+ * needed) because it was the one issue #11 gate-2 R2 #2's actor-unlock newly
+ * made reachable (mergePatch used to always skip `actor`, so it was
+ * unreachable before). The other three used to be a PRE-EXISTING gap — they
+ * flowed into `winnerByTarget` and relied on the base switch's own rejection
+ * at fold-time, which (per the reasoning above) does NOT give the same
+ * "prior valid reading stays in force" guarantee. issue #15 closed that gap
+ * FOR PATCHES: every PATCH admission candidate that survives this function's
+ * local check (and the foreign-field check) is now ALSO run through a trial
+ * fold in `applyCorrections` (see the "trial fold" block there) that
+ * would-be-applies it against the REAL base switch and rejects it,
+ * pre-admission, if doing so introduces any NEW structural error anywhere in
+ * the log — decompose containment cycles and negative-amount costs included,
+ * by walking the ordinary `applyDecompose`/`applyCost` switch cases, not by
+ * a bespoke duplicate check here. This function stays a narrow, cheap, LOCAL
+ * predicate for the one case that doesn't need a full replay to decide (a
+ * single-field check is exact); it is not itself broadened to cover the
+ * other three.
+ *
+ * NULLIFY IS DELIBERATELY OUT OF SCOPE for BOTH this local check and the
+ * trial fold — issue #15 fork F1 human ruling (2026-07-23): MODEL §2.5's
+ * worked example for 誤記表明 (a mistakenly-issued cancel, recovered by
+ * nullifying it) mandates APPLYING the removal and re-deriving the REMAINING
+ * sequence under unchanged first-tier semantics, with any residual
+ * inconsistency left as a VISIBLE derived result for a human to address —
+ * not pre-rejecting the nullify because applying it would produce that
+ * fallout. See `applyCorrections`'s admission block for the full citation
+ * and the patch/nullify split it implements.
  */
 function violatesNonHumanAgreement(merged: Event): boolean {
   return (
@@ -222,12 +233,17 @@ function targetNodeIdOf(ev: Event): NodeId {
 /**
  * Build the effective event stream from `events` plus a per-target winner
  * map. Callers MUST only ever put ADMITTED corrections into `winnerByTarget`
- * — nullify is always admitted; a patch is admitted iff (a) none of its
- * fields are foreign to the target's kind, (b) it does not violate a LOCAL
- * base-semantics predicate (e.g. `violatesNonHumanAgreement`), AND (c),
- * since issue #15, a trial fold of it introduces no NEW structural error
- * anywhere in the log (§2.10 "検証の迂回は不能" — see `applyCorrections`'s
- * "trial fold" block for (c)'s mechanics). An inapplicable record must never
+ * — nullify is ALWAYS admitted, UNCONDITIONALLY (issue #15 fork F1 human
+ * ruling, 2026-07-23 — MODEL §2.5's 誤記表明 doctrine: apply the removal,
+ * re-derive the remaining sequence as-is, let any downstream structural
+ * fallout surface honestly rather than pre-rejecting the nullify itself); a
+ * patch is admitted iff (a) none of its fields are foreign to the target's
+ * kind, (b) it does not violate a LOCAL base-semantics predicate (e.g.
+ * `violatesNonHumanAgreement`), AND (c), since issue #15, a trial fold of it
+ * introduces no NEW structural error anywhere in the log (§2.10 "検証の迂回
+ * は不能" — see `applyCorrections`'s "trial fold" block for (c)'s
+ * mechanics; PATCH ONLY — see that block's admission comment for why
+ * nullify does not share gate (c)). An inapplicable record must never
  * enter this map, so that the effective reading falls back to the preceding
  * valid correction (or the original event) rather than dropping the target
  * (§2.10: "適用不能であり、訂正レジスタに入らず、先行する有効な訂正が現行のまま
@@ -482,63 +498,83 @@ function applyCorrections(
 
     // ---- admission (§2.10 latest-wins governs ONLY the effective-stream
     // winner; ②③ above were evaluated regardless of what happens next).
-    // Two gates, in order, BOTH pre-admission (never let a rejected record
-    // reach `winnerByTarget`, even transiently):
-    //   (1) LOCAL checks — cheap, single-record predicates that don't need a
-    //       replay to decide. Patch-only (nullify has none: nullify is
-    //       always locally valid, unchanged from pre-issue-#15 behaviour).
-    //   (2) TRIAL FOLD (issue #15) — §2.10 "検証の迂回は不能" in full: would
-    //       admitting this candidate as the target's winner make the REAL
-    //       base switch (the same `applyDecompose`/`applyTransition`/
-    //       `applyRelate`/`applyCost` that an ordinary event goes through)
-    //       raise a structural error that wasn't already there? Applies
-    //       uniformly to nullify AND patch — nullify is not exempt: removing
-    //       an event from the stream can itself change what a LATER,
-    //       unrelated event's replay sees (e.g. nullifying an earlier
-    //       decompose can change the containment chain a later decompose
-    //       walks) and so can, in principle, also newly trip a structural
-    //       guard. Only gate (1) is patch-specific; gate (2) is symmetric.
-    if (c.correctionKind === 'patch') {
-      const { event: merged, foreignKeys } = mergePatch(target, c.patch);
-      // issue #11 gate-2 R2 #2 / §2.10 "検証の迂回は不能": a patch that would
-      // move a non-human actor onto an agreed estimate-transition is named
-      // verbatim in canon as an inapplicable-by-construction example (only a
-      // human may agree — R-U4/I6) — checked HERE, pre-admission, so it
-      // never reaches winnerByTarget (see violatesNonHumanAgreement's doc
-      // comment for why letting it flow through to the base switch instead
-      // would be wrong). This is a LOCAL check (no replay): both the
-      // foreign-field test and this predicate are exact from the merged
-      // event alone, so a trial fold would add nothing here — it is reserved
-      // for the three worked examples that genuinely need the base switch to
-      // decide (below).
-      const nonHumanAgreement = violatesNonHumanAgreement(merged);
-      if (foreignKeys.length > 0 || nonHumanAgreement) {
-        meter.inapplicable += 1;
-        inapplicableErrors.push(
-          foreignKeys.length > 0
-            ? `§2.10 inapplicable correction '${c.id}' → target '${c.targetEventId}': ` +
-              `patch names field(s) foreign to ${target.kind} — ${foreignKeys.join(', ')}`
-            : `§2.10/R-U4 inapplicable correction '${c.id}' → target '${c.targetEventId}': ` +
-              `patch would move a non-human actor onto an agreed estimate-transition — ` +
-              `rejected (only a human may agree, I6)`,
-        );
-        // Does NOT enter winnerByTarget: the prior valid reading (or the
-        // original event) stays in force (§2.10 — issue #11 gate-2 R1 #1).
-        continue;
-      }
+    //
+    // issue #15 fork F1 human ruling (2026-07-23, MODEL §2.5 "cancelled の
+    // 終端性と訂正" doctrine): nullify and patch are NOT symmetric here.
+    // §2.5's worked example for 誤記表明 (a mistakenly-issued cancel,
+    // recovered by nullifying it) is explicit about what happens next: "適用
+    // 後の読みでは当該遷移は無かったものとして扱われ、ノードの現在状態は残る
+    // イベント列を第一層の既存意味論でそのまま導出し直した結果である(特別な
+    // 系列修復は行わない…不整合が残るならそれは可視の導出結果であり、さらな
+    // る訂正か補償で人間が扱う;P0)" — "the read APPLIES the removal, re-
+    // derives the REMAINING sequence under UNCHANGED first-tier semantics
+    // with no special sequence repair, and any residual inconsistency is a
+    // VISIBLE DERIVED RESULT for a human to address via further correction
+    // or compensation." That is a mandate to APPLY nullify and let its
+    // downstream structural fallout surface honestly through the ordinary
+    // base-switch errors `fold()` already produces — NOT a mandate to
+    // pre-reject the nullify itself because applying it would produce such
+    // fallout. A patch is different in kind: §2.10 (i)'s FOUR "検証の迂回は
+    // 不能" worked examples are all patches (a value asserted as correct that
+    // the base switch's OWN semantics can immediately show is structurally
+    // impossible) — §2.5 has no equivalent "apply patches and let the
+    // fallout show" doctrine; on the contrary, letting a structurally
+    // impossible patched value become the winner would drop the target's
+    // effective reading to whatever the (rejected) base switch does with it,
+    // losing the prior valid reading rather than keeping it in force (see
+    // `violatesNonHumanAgreement`'s doc comment for the same reasoning
+    // applied to its one local example). So: PATCH gets a structural-result
+    // admission gate (validate BEFORE admitting); NULLIFY gets none (admit,
+    // then let the base switch's re-derivation speak for itself) — this is
+    // the §2.5/§2.10 reading split the fork ruling settles.
+    if (c.correctionKind === 'nullify') {
+      winnerByTarget.set(c.targetEventId, c); // always admitted — §2.5 doctrine above; no trial fold
+      continue;
     }
 
-    // ---- trial fold (issue #15, §2.10 "検証の迂回は不能"): tentatively make
-    // `c` the target's winner in a SCRATCH copy of `winnerByTarget`, run the
-    // REAL base switch over the resulting effective stream, and compare its
-    // structuralErrors against `preState`'s (computed above, BEFORE `c` was
-    // considered — the ②locked replay already had to build it, so this reuses
-    // it as the baseline at no extra fold cost). Record unit, all-or-nothing
-    // (v): `applyDecompose` tolerates a per-child rejection and keeps going,
-    // but if EVEN ONE child of this record's (possibly patched) reading would
-    // newly violate the tree-ness guard, the whole RECORD is rejected here —
-    // none of its fields (including any other, individually-harmless child)
-    // ever reaches `winnerByTarget`. Diffed by MULTISET CONTENT, not count
+    // ---- (patch only) LOCAL checks — cheap, single-record predicates that
+    // don't need a replay to decide.
+    const { event: merged, foreignKeys } = mergePatch(target, c.patch);
+    // issue #11 gate-2 R2 #2 / §2.10 "検証の迂回は不能": a patch that would
+    // move a non-human actor onto an agreed estimate-transition is named
+    // verbatim in canon as an inapplicable-by-construction example (only a
+    // human may agree — R-U4/I6) — checked HERE, pre-admission, so it
+    // never reaches winnerByTarget (see violatesNonHumanAgreement's doc
+    // comment for why letting it flow through to the base switch instead
+    // would be wrong). This is a LOCAL check (no replay): both the
+    // foreign-field test and this predicate are exact from the merged
+    // event alone, so a trial fold would add nothing here — it is reserved
+    // for the three worked examples that genuinely need the base switch to
+    // decide (below).
+    const nonHumanAgreement = violatesNonHumanAgreement(merged);
+    if (foreignKeys.length > 0 || nonHumanAgreement) {
+      meter.inapplicable += 1;
+      inapplicableErrors.push(
+        foreignKeys.length > 0
+          ? `§2.10 inapplicable correction '${c.id}' → target '${c.targetEventId}': ` +
+            `patch names field(s) foreign to ${target.kind} — ${foreignKeys.join(', ')}`
+          : `§2.10/R-U4 inapplicable correction '${c.id}' → target '${c.targetEventId}': ` +
+            `patch would move a non-human actor onto an agreed estimate-transition — ` +
+            `rejected (only a human may agree, I6)`,
+      );
+      // Does NOT enter winnerByTarget: the prior valid reading (or the
+      // original event) stays in force (§2.10 — issue #11 gate-2 R1 #1).
+      continue;
+    }
+
+    // ---- (patch only) trial fold (issue #15, §2.10 "検証の迂回は不能";
+    // issue #15 fork F1 — SCOPED TO PATCH, nullify never reaches here, see
+    // the admission comment above): tentatively make `c` the target's winner
+    // in a SCRATCH copy of `winnerByTarget`, run the REAL base switch over
+    // the resulting effective stream, and compare its structuralErrors
+    // against `preState`'s (computed above, BEFORE `c` was considered — the
+    // ②locked replay already had to build it, so this reuses it as the
+    // baseline at no extra fold cost). Record unit, all-or-nothing (v):
+    // `applyDecompose` tolerates a per-child rejection and keeps going, but
+    // if EVEN ONE child of this record's patched reading would newly violate
+    // the tree-ness guard, the whole RECORD is rejected here — none of its
+    // fields (including any other, individually-harmless child) ever
+    // reaches `winnerByTarget`. Diffed by MULTISET CONTENT, not count
     // (`newStructuralErrors` — a record that fixes one structural error while
     // introducing a different one must still be caught; a raw count could
     // net to zero and hide it).

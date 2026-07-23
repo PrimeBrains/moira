@@ -29,13 +29,14 @@
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
   statSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { CapacityStore, EventStore } from 'moira-backend';
 import type { CapacityEntry, Correction, Event, MilestoneDefinition, NodeId } from 'moira-backend';
 import { CliError } from './errors.js';
@@ -181,15 +182,30 @@ const LOCK_RETRY_DELAY_MS = 30;
 const LOCK_STALE_MS = 30_000;
 
 interface LockFileContents {
-  // issue #15 codex review: pid is now the PRIMARY and (whenever readable)
-  // SOLE staleness signal — see isLockStale. Previously a dead field for
+  // issue #15 codex review: pid is the PRIMARY and (whenever readable) SOLE
+  // staleness signal — see isLockStale. Previously a dead field for
   // staleness purposes (mtime alone decided); no longer.
   pid: number;
-  // Acquire-time wall clock — NOT read back by any staleness/ownership logic
-  // (isLockStale uses pid-liveness/fs-mtime; releaseCorrectionsLock matches
-  // on pid only). Kept purely as an operator-debugging aid: a human
-  // `cat`-ing a stuck `.lock` file mid-incident can see when it was written
-  // without cross-referencing `stat`.
+  // Per-ACQUISITION random token (issue #15 codex review, NOT-FIXED item):
+  // release now matches on `pid` AND `token` together, not `pid` alone.
+  // `pid` alone cannot distinguish two DIFFERENT acquisitions made by the
+  // SAME process (e.g. two `MoiraRepo` instances in one Node process, or a
+  // re-acquisition after a fast release/re-acquire cycle) — a pid-only
+  // match would let a lagging/delayed release call from an EARLIER
+  // acquisition incorrectly delete a LATER, still-live acquisition's lock
+  // just because they share a pid. The token makes ownership specific to
+  // the exact acquisition, not merely the process. Generated fresh in
+  // `acquireCorrectionsLock` and threaded back to the matching
+  // `releaseCorrectionsLock` call by the caller (`appendCorrections`) —
+  // never read back by `isLockStale` (staleness still keys on `pid` alone,
+  // per the coordinator's instruction: identifying an ABANDONED lock only
+  // needs to know whether ANY process claims that pid, not which specific
+  // acquisition it was).
+  token: string;
+  // Acquire-time wall clock — NOT read back by any staleness/ownership logic.
+  // Kept purely as an operator-debugging aid: a human `cat`-ing a stuck
+  // `.lock` file mid-incident can see when it was written without
+  // cross-referencing `stat`.
   ts: number;
 }
 
@@ -455,15 +471,57 @@ export class MoiraRepo {
     return `${this.correctionsPath}.lock`;
   }
 
-  /** One non-blocking attempt at the exclusive create. `true` = acquired. */
-  private tryCreateLock(lockPath: string): boolean {
+  /** One non-blocking attempt at the exclusive create, stamped with the
+   * given per-acquisition `token` (see `LockFileContents.token`'s doc
+   * comment). `true` = acquired. */
+  private tryCreateLock(lockPath: string, token: string): boolean {
     try {
-      const contents: LockFileContents = { pid: process.pid, ts: Date.now() };
+      const contents: LockFileContents = { pid: process.pid, token, ts: Date.now() };
       writeFileSync(lockPath, JSON.stringify(contents), { flag: 'wx' });
       return true;
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e; // unexpected fs error — surface as-is
       return false;
+    }
+  }
+
+  /**
+   * Best-effort garbage-collection of orphaned `.steal-*` artifacts (issue
+   * #15 codex review, new Minor): a live-capture in `tryStealIfStale`
+   * permanently abandons its captured file rather than risk an unsafe
+   * discard (see that function's doc comment) — over a long-running repo's
+   * lifetime these can accumulate. Called once per `acquireCorrectionsLock`
+   * invocation (cheap in the common case: an empty/small directory listing
+   * and zero matches). Only removes an orphan whose EMBEDDED pid is
+   * CONFIRMED DEAD — a still-live one (however it got orphaned) is left
+   * untouched, and one whose pid can't be read at all is ALSO left
+   * untouched (no basis to declare it safe to remove — this is narrower
+   * than `isLockStale`'s own unreadable+aged fallback, deliberately: this
+   * is opportunistic tidying, not a correctness-load-bearing path, so it
+   * errs conservative). Any failure scanning the directory or removing an
+   * entry is swallowed — this is availability housekeeping, not a
+   * correctness mechanism; a failure here must never block or fail the
+   * caller's actual lock acquisition.
+   */
+  private gcOrphanedStealFiles(lockPath: string): void {
+    try {
+      const dir = dirname(lockPath);
+      const prefix = `${basename(lockPath)}.steal-`;
+      for (const name of readdirSync(dir)) {
+        if (!name.startsWith(prefix)) continue;
+        const full = join(dir, name);
+        const pid = readLockHolderPid(full);
+        if (pid !== undefined && !isProcessAlive(pid)) {
+          try {
+            unlinkSync(full);
+          } catch {
+            // raced with something else clearing it, or a permissions
+            // hiccup — best-effort, move on
+          }
+        }
+      }
+    } catch {
+      // directory listing itself failed — best-effort, not correctness-critical
     }
   }
 
@@ -569,30 +627,39 @@ export class MoiraRepo {
   /**
    * Acquire the corrections.json advisory lock (issue #15). Exclusive create
    * (`wx`, via `tryCreateLock`) is the actual mutual-exclusion primitive —
-   * two processes racing to create the same path can never both succeed. On
-   * contention (EEXIST): attempt a rename-based steal of an abandoned lock
-   * (`tryStealIfStale` — see its own doc comment for the full design and its
-   * honest residual), then back off briefly and retry, bounded by
-   * LOCK_MAX_ATTEMPTS — exhausting the budget is a loud CliError, never a
-   * silent pass-through (a caller that ignored the lock would reintroduce
-   * the exact lost-update this exists to prevent). The error names the lock
-   * path and the (best-effort) current holder pid, and reads as operator
-   * guidance: since a LIVE holder's lock is now never auto-stolen (see
-   * LOCK_STALE_MS's comment), a wedged-but-alive holder genuinely requires a
-   * human to intervene — this is not something the retry loop can resolve
-   * for itself, and the message says so rather than implying it will
-   * eventually clear on its own. M-2 (issue #15 review): a steal that lands
-   * on the FINAL budgeted attempt would otherwise be wasted — we'd throw
-   * despite having just cleared the contention ourselves — so the last
-   * attempt gets one immediate extra `tryCreateLock` before giving up.
+   * two processes racing to create the same path can never both succeed. A
+   * fresh per-acquisition TOKEN (issue #15 codex review) is generated here
+   * and returned to the caller, which must thread it through to the matching
+   * `releaseCorrectionsLock(token)` call — see `LockFileContents.token`'s
+   * doc comment for why pid alone is not enough to identify ownership. On
+   * contention (EEXIST): opportunistically GC any dead-pid `.steal-*`
+   * orphans from a past live-capture (`gcOrphanedStealFiles`, new Minor —
+   * availability housekeeping, not correctness), attempt a rename-based
+   * steal of an abandoned lock (`tryStealIfStale` — see its own doc comment
+   * for the full design and its honest residual), then back off briefly and
+   * retry, bounded by LOCK_MAX_ATTEMPTS — exhausting the budget is a loud
+   * CliError, never a silent pass-through (a caller that ignored the lock
+   * would reintroduce the exact lost-update this exists to prevent). The
+   * error names the lock path and the (best-effort) current holder pid, and
+   * reads as operator guidance: since a LIVE holder's lock is now never
+   * auto-stolen (see LOCK_STALE_MS's comment), a wedged-but-alive holder
+   * genuinely requires a human to intervene — this is not something the
+   * retry loop can resolve for itself, and the message says so rather than
+   * implying it will eventually clear on its own. M-2 (issue #15 review): a
+   * steal that lands on the FINAL budgeted attempt would otherwise be
+   * wasted — we'd throw despite having just cleared the contention
+   * ourselves — so the last attempt gets one immediate extra
+   * `tryCreateLock` before giving up.
    */
-  private acquireCorrectionsLock(): void {
+  private acquireCorrectionsLock(): string {
     const lockPath = this.correctionsLockPath;
+    const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    this.gcOrphanedStealFiles(lockPath);
     for (let attempt = 1; attempt <= LOCK_MAX_ATTEMPTS; attempt += 1) {
-      if (this.tryCreateLock(lockPath)) return;
+      if (this.tryCreateLock(lockPath, token)) return token;
       this.tryStealIfStale(lockPath);
       if (attempt === LOCK_MAX_ATTEMPTS) {
-        if (this.tryCreateLock(lockPath)) return; // M-2: cash in a steal that just happened on this final attempt
+        if (this.tryCreateLock(lockPath, token)) return token; // M-2: cash in a steal that just happened on this final attempt
         const holderPid = readLockHolderPid(lockPath);
         throw new CliError(
           `corrections.json の書き込みロックを取得できませんでした（${lockPath}` +
@@ -603,47 +670,62 @@ export class MoiraRepo {
       }
       sleepSync(LOCK_RETRY_DELAY_MS);
     }
+    // Unreachable — the loop above always either returns or throws on its
+    // LOCK_MAX_ATTEMPTS-th iteration; this satisfies the compiler only.
+    throw new CliError('corrections.json の書き込みロック取得ループが異常終了しました（到達しないはずの経路）');
   }
 
   /**
-   * Unlink the lock ONLY if it is still stamped with OUR pid — never
-   * unconditionally.
+   * Unlink the lock ONLY if it is still stamped with BOTH our pid AND the
+   * exact per-acquisition `token` returned by the matching
+   * `acquireCorrectionsLock` call — never unconditionally, and (issue #15
+   * codex review, NOT-FIXED item addressed here) never on pid alone.
+   *
+   * Why pid alone was insufficient: pid identifies a PROCESS, not a
+   * particular ACQUISITION — two different acquisitions (e.g. two
+   * `MoiraRepo` instances constructed in the same Node process, or a fast
+   * release-then-reacquire on the same instance) share a pid but must not
+   * be treated as interchangeable for release purposes. A pid-only guard
+   * would let a release call belonging to an EARLIER acquisition delete a
+   * LATER, still-live acquisition's lock merely because both happen to run
+   * in the same process. Matching the token closes that.
    *
    * issue #15 codex review (residual re-evaluated after the Critical
-   * rename-based-steal fix above): now that `tryStealIfStale` NEVER steals a
-   * lock whose recorded pid is confirmed LIVE — regardless of the lock
-   * file's age — the "our live lock gets stolen out from under us" pathway
-   * this guard originally defended against is CLOSED under ordinary
-   * operation. As long as THIS process is alive, `process.kill(ourPid, 0)`
-   * reports it alive to any prospective stealer, and `isLockStale` returns
-   * false for it — nothing steals it. The old "held past 30s ⇒ eligible for
-   * steal even if alive" framing no longer applies; that was the exact bug
-   * this round's Important fix removed.
+   * rename-based-steal fix): now that `tryStealIfStale` NEVER steals a lock
+   * whose recorded pid is confirmed LIVE — regardless of the lock file's
+   * age — the "our live lock gets stolen out from under us BY ANOTHER
+   * PROCESS" pathway is CLOSED under ordinary operation; the token
+   * refinement above closes the SAME-PROCESS analogue of that pathway. The
+   * read-then-unlink pair below is STILL a TOCTOU (unchanged by
+   * tokenization — that is a separate, orthogonal property from WHOM the
+   * check identifies): between the read and the unlink, in principle
+   * something could still rename/replace the file. In practice, since only
+   * a CONFIRMED-DEAD pid is ever stolen (see LOCK_STALE_MS and
+   * `isLockStale`), and this call's own process is (by construction) alive
+   * while it runs, this specific gap has no realistic trigger left, but the
+   * two operations are still not one atomic syscall.
    *
-   * The only theoretical residual is OS PID REUSE: if this process were to
-   * die WITHOUT reaching this `finally` block (not reachable via this
-   * function's own normal control flow — this function only ever runs
-   * inside a `finally` — but conceivable under e.g. SIGKILL or a host
-   * crash), its pid becomes free; if the OS then reassigns that EXACT pid
-   * to an unrelated new process before any stealer re-checks, the stealer
-   * would (correctly, per the information available to it) see a live
-   * process at that pid and hold off. This is an AVAILABILITY hiccup for the
-   * abandoned lock (it stays parked until someone manually clears it or the
-   * reused pid itself exits) — not a correctness violation; nothing gets
-   * double-written. This guard's own pid-match is retained regardless, as
-   * defense in depth against future changes to the steal path, not because
-   * a live-steal is currently reachable.
+   * The only remaining theoretical residual is OS PID REUSE combined with
+   * this process dying WITHOUT reaching this `finally` block (not reachable
+   * via this function's own normal control flow — it only ever runs inside
+   * a `finally` — but conceivable under e.g. SIGKILL or a host crash): its
+   * pid becomes free, and if the OS reassigns that EXACT pid to an
+   * unrelated new process before any stealer re-checks, the stealer would
+   * (correctly, per the information available to it) see a live process at
+   * that pid and hold off. This is an AVAILABILITY hiccup for the abandoned
+   * lock (stays parked until manually cleared or the reused pid exits) —
+   * not a correctness violation; nothing gets double-written.
    */
-  private releaseCorrectionsLock(): void {
+  private releaseCorrectionsLock(token: string): void {
     let owned = false;
     try {
       const parsed = JSON.parse(readFileSync(this.correctionsLockPath, 'utf8')) as
         Partial<LockFileContents>;
-      owned = parsed.pid === process.pid;
+      owned = parsed.pid === process.pid && parsed.token === token;
     } catch {
       return; // gone or unreadable — nothing of ours left to release
     }
-    if (!owned) return; // stolen by (and now owned by) another writer — not ours to delete
+    if (!owned) return; // not THIS acquisition's lock (stolen, or a different acquisition by the same pid) — not ours to delete
     try {
       unlinkSync(this.correctionsLockPath);
     } catch {
@@ -653,7 +735,7 @@ export class MoiraRepo {
   }
 
   appendCorrections(recs: readonly Correction[]): void {
-    this.acquireCorrectionsLock();
+    const lockToken = this.acquireCorrectionsLock();
     try {
       const all = [...this.loadCorrections(), ...recs];
       const tmp = `${this.correctionsPath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -672,7 +754,7 @@ export class MoiraRepo {
         throw e;
       }
     } finally {
-      this.releaseCorrectionsLock();
+      this.releaseCorrectionsLock(lockToken);
     }
   }
 

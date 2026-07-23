@@ -259,6 +259,29 @@ describe('MoiraRepo corrections.json (append-only third tier — issue #11 R7)',
       expect(leftovers).toEqual([]);
     });
 
+    // issue #15 codex review (new Minor): opportunistic GC of orphaned
+    // `.steal-*` artifacts (the permanent-leak side of `tryStealIfStale`'s
+    // live-capture abandon branch — see that function's doc comment) at the
+    // start of every `acquireCorrectionsLock` call.
+    describe('.steal-* orphan GC (issue #15 codex review, new Minor)', () => {
+      it('removes an orphaned `.steal-*` file whose embedded pid is DEAD, and leaves one with a LIVE pid untouched', () => {
+        const repo = new MoiraRepo(tmp);
+        repo.init({ projectRoot: 'p', me: 'me' });
+        const lockPath = `${repo.correctionsPath}.lock`;
+        const dead = spawnSync(process.execPath, ['-e', '0']);
+        const deadOrphan = `${lockPath}.steal-${dead.pid}-fake-dead`;
+        const liveOrphan = `${lockPath}.steal-${process.pid}-fake-live`; // our own pid — guaranteed alive
+        writeFileSync(deadOrphan, JSON.stringify({ pid: dead.pid, token: 't', ts: Date.now() }), 'utf8');
+        writeFileSync(liveOrphan, JSON.stringify({ pid: process.pid, token: 't', ts: Date.now() }), 'utf8');
+        // Any successful acquire (this one is uncontended) runs the GC first.
+        repo.appendCorrections([
+          { id: 'c1', ts: 1, actor: { kind: 'human', id: 'me' }, targetEventId: 'e1', reason: 'r', correctionKind: 'nullify' },
+        ]);
+        expect(existsSync(deadOrphan)).toBe(false); // dead pid — swept
+        expect(existsSync(liveOrphan)).toBe(true); // live pid — left alone
+      });
+    });
+
     // issue #15 codex review (Important): a real cross-process exclusion
     // witness. The prior two-MoiraRepo-instance test above is entirely
     // sequential (single Node process) and would still pass even with the
@@ -329,32 +352,55 @@ describe('MoiraRepo corrections.json (append-only third tier — issue #11 R7)',
       expect(existsSync(lockPath)).toBe(false); // whichever ran last released cleanly
     }, 10000);
 
-    // issue #15 kiro-review I-3 (Important): the pid-guard's TWO branches in
-    // `releaseCorrectionsLock` (own-pid → delete; other-pid → leave alone —
-    // the fix for the cross-delete race the review flagged) are both
+    // issue #15 kiro-review I-3 / codex review (NOT-FIXED item): the
+    // pid+token guard's branches in `releaseCorrectionsLock` are all
     // reachable and testable IN A SINGLE PROCESS via the private method
     // directly. This does NOT exercise the acquire-side steal/retry path
     // (those are the tests above) — it isolates release's OWN ownership
-    // check.
-    describe('releaseCorrectionsLock pid-guard (issue #15 review I-3 — testable in-process via the private seam)', () => {
+    // check, now token-aware: pid alone is no longer sufficient to match
+    // (see `LockFileContents.token`'s doc comment — pid identifies a
+    // PROCESS, token identifies a specific ACQUISITION).
+    describe('releaseCorrectionsLock pid+token guard (issue #15 review I-3 / codex NOT-FIXED — testable in-process via the private seam)', () => {
       it('leaves the lockfile in place when it is stamped with a DIFFERENT pid (not ours to delete)', () => {
         const repo = new MoiraRepo(tmp);
         repo.init({ projectRoot: 'p', me: 'me' });
         const lockPath = `${repo.correctionsPath}.lock`;
-        const other = spawnSync(process.execPath, ['-e', '0']); // any pid other than ours — dead or alive doesn't matter to this guard, which only compares pid values
-        writeFileSync(lockPath, JSON.stringify({ pid: other.pid, ts: Date.now() }), 'utf8');
+        const other = spawnSync(process.execPath, ['-e', '0']); // any pid other than ours — dead or alive doesn't matter to this guard, which only compares stamped values
+        writeFileSync(lockPath, JSON.stringify({ pid: other.pid, token: 'tok-other', ts: Date.now() }), 'utf8');
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (repo as any).releaseCorrectionsLock();
+        (repo as any).releaseCorrectionsLock('tok-other');
         expect(existsSync(lockPath)).toBe(true); // NOT ours — must survive
       });
 
-      it('deletes the lockfile when it is stamped with OUR OWN pid', () => {
+      // The property tokenization exists for: SAME pid (this process),
+      // DIFFERENT token — i.e. a DIFFERENT acquisition than the one whose
+      // release is being attempted. A pid-only guard would have wrongly
+      // deleted this; the token guard must not.
+      it('leaves the lockfile in place when it is stamped with OUR pid but a DIFFERENT token (a different acquisition)', () => {
         const repo = new MoiraRepo(tmp);
         repo.init({ projectRoot: 'p', me: 'me' });
         const lockPath = `${repo.correctionsPath}.lock`;
-        writeFileSync(lockPath, JSON.stringify({ pid: process.pid, ts: Date.now() }), 'utf8');
+        writeFileSync(
+          lockPath,
+          JSON.stringify({ pid: process.pid, token: 'tok-current-acquisition', ts: Date.now() }),
+          'utf8',
+        );
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (repo as any).releaseCorrectionsLock();
+        (repo as any).releaseCorrectionsLock('tok-a-different-acquisition');
+        expect(existsSync(lockPath)).toBe(true); // same pid, WRONG token — must survive
+      });
+
+      it('deletes the lockfile when it is stamped with OUR OWN pid AND the matching token', () => {
+        const repo = new MoiraRepo(tmp);
+        repo.init({ projectRoot: 'p', me: 'me' });
+        const lockPath = `${repo.correctionsPath}.lock`;
+        writeFileSync(
+          lockPath,
+          JSON.stringify({ pid: process.pid, token: 'tok-mine', ts: Date.now() }),
+          'utf8',
+        );
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (repo as any).releaseCorrectionsLock('tok-mine');
         expect(existsSync(lockPath)).toBe(false); // ours — released
       });
     });
