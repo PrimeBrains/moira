@@ -80,3 +80,39 @@ issue: 15
 
 - changed（base 6b0e45d..HEAD・moira/changes/ 自己除外後）: fold.ts・correction.test.ts・store.ts・correct.test.ts の 4 パス
 - mapped（R1〜R4）との差 = ∅——P2 差し戻しなし
+
+## M 面ゲート（R5 / moira-model-update・MODEL §7#20 実装状態追補）
+
+### ドラフト（未コミット・日英 2 段落のみ）
+
+- 著者: 主コンテキスト。§7#20 に「(2026-07-23 追補: #15 実装工程完了)」を日英同形式で追記。
+  規範文（§2.10 等）は不変（git diff --numstat = 2 2・単一 hunk）。
+
+### ラウンド 1（敵対 Claude 1＋codex 1・fact-check・2026-07-23）
+
+- moira-adversary（V1〜V6）: Critical 0・**Important 1**（追補「3 例」が §2.10 列挙 4 例と
+  未和解——第 4 例〔非人間 actor→agreed〕の扱いを読者が判定できない完全性ギャップ）・
+  Suggestion 1（「常に適用」の絶対性 vs 幽霊 nullify）・FYI 1（§2.10 単読時の表層語彙緊張）・
+  **FORK F-A**（patch/nullify 読み分けの将来 §2.10 明文化 vs §7 開示のみ）
+- codex（独立ベンダー・写像: 自尺度 Important→Important・格下げなし）: Critical 0・
+  **Important 1**（D-1/D-79 同期主張の時制——カタログ現物は未同期のため完了形は不一致。
+  対処案 (b) 予定表現へ弱める）・FYI 5（実装照合一致・nullify 整合・lock 記述正確・
+  日英同期・diff 範囲 2 行のみ）。生ログ: scratchpad/codex-review-attempt1.log
+- moira-fact-checker: claim 1/3/5/7 CONFIRMED・claim 2/4 の green と claim 8 の diff 範囲は
+  ワーカーのツール制約で UNVERIFIABLE → **著者が新鮮証拠で解消**（backend 201/201・
+  CLI 353+2 skip を本セッションで実走・git diff --numstat 2 2 を実走記録）・claim 6 は
+  時制確認要請（codex Important と同根）
+
+### パッチ（著者・同ラウンド内）
+
+- Important（敵対者）: 「第 4 例は #11 で入口検証済み・列挙 4 例すべてが patch 訂正の
+  入口検証で覆われる」を日英に明記 → 修正済み
+- Important（codex）: D-1/D-79 同期文を予定表現（「後続の文書ゲートが引き受ける」/
+  "owned by a SUBSEQUENT document gate"）へ弱め → 修正済み
+- Suggestion: 「常に適用され」→「入口検証では拒否されず(幽霊訂正の可視ギャップ扱いは
+  従前どおり)」へ日英とも修正済み
+
+### HB fork 裁定（F2・2026-07-23）
+
+- FORK F-A → fork-batch.md F2 として HB へ。裁定: **(B) 現状維持**（§7#20 開示のみ・
+  将来の訂正機能シナリオ整備時に再訪）。追加作業なし。
