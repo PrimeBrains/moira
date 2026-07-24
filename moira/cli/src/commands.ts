@@ -841,7 +841,10 @@ function cmdConfigOrgCalendar(rest: string[]): void {
   if (arg !== 'on' && arg !== 'off') {
     throw new CliError('usage: moira config org-calendar [on|off]');
   }
-  repo.writeConfig({ ...cfg, orgCalendar: { enabled: arg === 'on' } });
+  // RMW through updateConfig so the merge+write is serialized under the config
+  // lock — the earlier `cfg` load is display-only; the write re-reads inside the
+  // lock so a concurrent config writer can't be silently clobbered (issue #17).
+  repo.updateConfig({ orgCalendar: { enabled: arg === 'on' } });
   out(`org-calendar: ${arg}`);
 }
 
@@ -885,15 +888,14 @@ function cmdMemberAdd(rest: string[]): void {
   }
 
   const repo = requireRepo();
-  const members = repo.loadMembers();
   const member: Member = { id: actor.id, kind, label };
   if (defaultCapacity !== undefined) member.defaultCapacity = defaultCapacity;
-  const idx = members.findIndex((m) => m.id === actor.id);
-  if (idx >= 0) members[idx] = member;
-  else members.push(member);
-  repo.saveMembers(members);
+  // RMW (find-then-add/replace) through upsertMember so it is serialized under
+  // the members lock — a load-here/save-here pair could not have prevented a
+  // lost update between two concurrent `member add` writers (issue #17).
+  const replaced = repo.upsertMember(member);
   repo.setActorLabel(actor.id, label); // roster id → display name
-  out(`${idx >= 0 ? '~' : '+'} member ${kind}:${actor.id} "${label}"${defaultCapacity === undefined ? '' : ` (既定稼働率 ${defaultCapacity})`}`);
+  out(`${replaced ? '~' : '+'} member ${kind}:${actor.id} "${label}"${defaultCapacity === undefined ? '' : ` (既定稼働率 ${defaultCapacity})`}`);
 }
 
 function cmdMemberList(rest: string[]): void {
@@ -1093,8 +1095,10 @@ async function cmdImportMembers(rest: string[]): Promise<void> {
     return;
   }
 
-  // Commit: roster upsert, then bulk actorLabels, then ONE appendCapacity.
-  repo.saveMembers(plan.members);
+  // Commit: roster upsert (locked RMW — re-merges onto a FRESH read inside the
+  // members lock so a concurrent `member add` is never clobbered, issue #17),
+  // then bulk actorLabels, then ONE appendCapacity (each its own locked RMW).
+  repo.upsertMembers(plan.incomingMembers);
   if (Object.keys(plan.actorLabels).length > 0) repo.setActorLabels(plan.actorLabels);
   if (plan.capacityEntries.length > 0) repo.appendCapacity(plan.capacityEntries);
 

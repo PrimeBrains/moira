@@ -262,7 +262,7 @@ describe('MoiraRepo corrections.json (append-only third tier — issue #11 R7)',
     // issue #15 codex review (new Minor): opportunistic GC of orphaned
     // `.steal-*` artifacts (the permanent-leak side of `tryStealIfStale`'s
     // live-capture abandon branch — see that function's doc comment) at the
-    // start of every `acquireCorrectionsLock` call.
+    // start of every `acquireLock` call.
     describe('.steal-* orphan GC (issue #15 codex review, new Minor)', () => {
       it('removes an orphaned `.steal-*` file whose embedded pid is DEAD, and leaves one with a LIVE pid untouched', () => {
         const repo = new MoiraRepo(tmp);
@@ -353,14 +353,14 @@ describe('MoiraRepo corrections.json (append-only third tier — issue #11 R7)',
     }, 10000);
 
     // issue #15 kiro-review I-3 / codex review (NOT-FIXED item): the
-    // pid+token guard's branches in `releaseCorrectionsLock` are all
+    // pid+token guard's branches in `releaseLock` are all
     // reachable and testable IN A SINGLE PROCESS via the private method
     // directly. This does NOT exercise the acquire-side steal/retry path
     // (those are the tests above) — it isolates release's OWN ownership
     // check, now token-aware: pid alone is no longer sufficient to match
     // (see `LockFileContents.token`'s doc comment — pid identifies a
     // PROCESS, token identifies a specific ACQUISITION).
-    describe('releaseCorrectionsLock pid+token guard (issue #15 review I-3 / codex NOT-FIXED — testable in-process via the private seam)', () => {
+    describe('releaseLock pid+token guard (issue #15 review I-3 / codex NOT-FIXED — testable in-process via the private seam)', () => {
       it('leaves the lockfile in place when it is stamped with a DIFFERENT pid (not ours to delete)', () => {
         const repo = new MoiraRepo(tmp);
         repo.init({ projectRoot: 'p', me: 'me' });
@@ -368,7 +368,7 @@ describe('MoiraRepo corrections.json (append-only third tier — issue #11 R7)',
         const other = spawnSync(process.execPath, ['-e', '0']); // any pid other than ours — dead or alive doesn't matter to this guard, which only compares stamped values
         writeFileSync(lockPath, JSON.stringify({ pid: other.pid, token: 'tok-other', ts: Date.now() }), 'utf8');
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (repo as any).releaseCorrectionsLock('tok-other');
+        (repo as any).releaseLock(repo.correctionsPath, 'tok-other');
         expect(existsSync(lockPath)).toBe(true); // NOT ours — must survive
       });
 
@@ -386,7 +386,7 @@ describe('MoiraRepo corrections.json (append-only third tier — issue #11 R7)',
           'utf8',
         );
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (repo as any).releaseCorrectionsLock('tok-a-different-acquisition');
+        (repo as any).releaseLock(repo.correctionsPath, 'tok-a-different-acquisition');
         expect(existsSync(lockPath)).toBe(true); // same pid, WRONG token — must survive
       });
 
@@ -400,7 +400,7 @@ describe('MoiraRepo corrections.json (append-only third tier — issue #11 R7)',
           'utf8',
         );
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (repo as any).releaseCorrectionsLock('tok-mine');
+        (repo as any).releaseLock(repo.correctionsPath, 'tok-mine');
         expect(existsSync(lockPath)).toBe(false); // ours — released
       });
     });

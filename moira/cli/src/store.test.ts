@@ -55,12 +55,12 @@ describe('MoiraRepo — .moira/ persistence round-trips', () => {
     expect(cfg.me).toBe('taro');
   });
 
-  it('members: init seeds [] and save/load round-trips (defaultCapacity key omitted when absent)', () => {
+  it('members: init seeds [] and upsert/load round-trips (defaultCapacity key omitted when absent)', () => {
     const repo = new MoiraRepo(dir);
     repo.init({ projectRoot: 'root', me: 'me' });
     expect(repo.loadMembers()).toEqual([]);
 
-    repo.saveMembers([
+    repo.upsertMembers([
       { id: 'nakao', kind: 'human', label: '中尾' },
       { id: 'agent:claude', kind: 'agent', label: 'Claude', defaultCapacity: 0.5 },
     ]);

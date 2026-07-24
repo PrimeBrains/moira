@@ -3,9 +3,12 @@
 // orgCalendarFallback in org-calendar.ts is the motivating fallback, but this
 // file tests capacity-store.ts's own contract independent of that calendar).
 
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CapacityStore, DEFAULT_CAPACITY } from './capacity-store.js';
-import type { CapacityLookup } from './types.js';
+import type { CapacityEntry, CapacityLookup } from './types.js';
 
 describe('CapacityStore.capacityOf (explicit entry vs fallback)', () => {
   it('defaults to DEFAULT_CAPACITY with no fallback and no entry (backward compatible)', () => {
@@ -57,5 +60,61 @@ describe('CapacityStore.lookup (bound CapacityLookup, fallback passthrough)', ()
     expect(lookup('alice', '2026-07-06')).toBe(0.5); // explicit entry still wins
     expect(lookup('alice', '2026-07-04')).toBe(0); // no entry → fallback
     expect(lookup('alice', '2026-07-05')).toBe(1.0); // no entry → fallback
+  });
+});
+
+// issue #17 R5: capacity.json is now persisted via atomicWriteFileSync
+// (temp→rename) — same durability treatment as EventStore.saveJson (#16). The
+// observable output must stay byte-identical (2-space JSON, NO trailing newline,
+// insertion order preserved by all()) and leave no `.tmp-` residue.
+describe('CapacityStore.saveJson (atomic persistence — issue #17)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'moira-capacity-'));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const entry = (humanId: string, date: string, capacity: number, ts: number): CapacityEntry => ({
+    humanId,
+    date,
+    capacity,
+    reason: 'temporary-reduction',
+    ts,
+  });
+
+  it('writes 2-space JSON with NO trailing newline, entries in append order (byte-format unchanged)', () => {
+    const store = new CapacityStore();
+    store.append(entry('alice', '2026-08-01', 0.5, 1));
+    store.append(entry('bob', '2026-08-02', 0.8, 2));
+    const path = join(dir, 'capacity.json');
+    store.saveJson(path);
+    const raw = readFileSync(path, 'utf8');
+    expect(raw).toBe(
+      JSON.stringify([entry('alice', '2026-08-01', 0.5, 1), entry('bob', '2026-08-02', 0.8, 2)], null, 2),
+    );
+    expect(raw.endsWith('\n')).toBe(false);
+  });
+
+  it('leaves no `.tmp-` residue after saveJson', () => {
+    const store = new CapacityStore();
+    store.append(entry('alice', '2026-08-01', 0.5, 1));
+    store.saveJson(join(dir, 'capacity.json'));
+    expect(readdirSync(dir).filter((f) => f.includes('.tmp-'))).toEqual([]);
+  });
+
+  it('round-trips through loadJson (save then load yields the same entries)', () => {
+    const store = new CapacityStore();
+    store.append(entry('alice', '2026-08-01', 0.5, 1));
+    store.append(entry('bob', '2026-08-02', 0.8, 2));
+    const path = join(dir, 'capacity.json');
+    store.saveJson(path);
+    const reloaded = new CapacityStore();
+    reloaded.loadJson(path);
+    expect(reloaded.all()).toEqual([
+      entry('alice', '2026-08-01', 0.5, 1),
+      entry('bob', '2026-08-02', 0.8, 2),
+    ]);
   });
 });

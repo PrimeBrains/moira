@@ -22,6 +22,7 @@ export {
   type MilestoneRollupRow,
 } from './derivations/milestone-rollup.js';
 export { fold, materializeEffectiveEvents } from './fold.js';
+export { atomicWriteFileSync } from './atomic-write.js';
 export { EventStore, sortEvents } from './event-store.js';
 export {
   CapacityStore,

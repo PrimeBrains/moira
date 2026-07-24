@@ -5,7 +5,8 @@
 // capacity. A c change triggers re-derivation of the live forecast (R-S2
 // MODEL:283), exactly like an event append.
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { atomicWriteFileSync } from './atomic-write.js';
 import type { CapacityEntry, CapacityLookup, IsoDate } from './types.js';
 
 /** Unspecified days default to 1.0 MD/day — backward compatible (A4 MODEL:34). */
@@ -59,9 +60,13 @@ export class CapacityStore {
     this.appendAll(parsed);
   }
 
-  /** Persist all entries (symmetric with EventStore.saveJson; append-only on disk). */
+  /** Persist all entries (symmetric with EventStore.saveJson; append-only on disk).
+   *  Atomic replace (temp→rename) guards against torn writes (issue #17); output
+   *  bytes are unchanged (no trailing newline). Concurrent read-modify-write
+   *  (MoiraRepo.appendCapacity) is serialized SEPARATELY by the CLI's advisory
+   *  lock — see moira/cli/src/store.ts. */
   saveJson(path: string): void {
-    writeFileSync(path, JSON.stringify(this.all(), null, 2), 'utf8');
+    atomicWriteFileSync(path, JSON.stringify(this.all(), null, 2));
   }
 }
 

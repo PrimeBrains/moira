@@ -225,8 +225,11 @@ export function watchMoiraDir(dir: string, onChange: () => void): { close: () =>
 export function serveUi(options: UiServerOptions): Promise<RunningUi> {
   const { distDir, port, fixture, watchDir, watchDirs } = options;
 
-  // Last-good guard: the CLI writes .moira files non-atomically, so a read can
-  // race a write and fail to parse — keep serving the previous snapshot.
+  // Last-good guard: RMW writes now land atomically (temp→rename, issue #16/#17)
+  // so a reader never observes a torn file mid-write (renameSync is atomic). A
+  // parse failure can still arise from a NON-atomic source — init's create-once
+  // seeds (§7#20 residual) or an out-of-band edit/truncation — so keep serving
+  // the previous snapshot on a parse failure as cheap defense-in-depth.
   let lastGood: UiPayload | null = null;
   const readFixture = (): UiPayload => {
     try {

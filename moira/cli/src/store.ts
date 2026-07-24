@@ -37,7 +37,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { CapacityStore, EventStore } from 'moira-backend';
+import { atomicWriteFileSync, CapacityStore, EventStore } from 'moira-backend';
 import type { CapacityEntry, Correction, Event, MilestoneDefinition, NodeId } from 'moira-backend';
 import { CliError } from './errors.js';
 
@@ -73,6 +73,24 @@ export interface Member {
   kind: 'human' | 'agent';
   label: string;
   defaultCapacity?: number;
+}
+
+/**
+ * Upsert `incoming` onto `existing` by id — overwrite an existing entry IN PLACE
+ * (position preserved), append a genuinely new one. Pure; the SINGLE source of
+ * roster-merge truth shared by `planMembersImport`'s dry-run preview and
+ * `MoiraRepo.upsertMembers`'s locked commit — the merge RULE cannot diverge
+ * between the two arms: on the SAME base the preview and committed rosters are
+ * byte-identical, while the locked commit re-loads a FRESH base inside the lock,
+ * so its result may legitimately differ from the preview when a concurrent write
+ * interleaved — that divergence IS the lost-update protection (issue #17 — the
+ * `import members` RMW). Map
+ * insertion-order gives exactly that overwrite-in-place / append-new semantics.
+ */
+export function mergeRoster(existing: readonly Member[], incoming: readonly Member[]): Member[] {
+  const byId = new Map<string, Member>(existing.map((e) => [e.id, e]));
+  for (const m of incoming) byId.set(m.id, m);
+  return [...byId.values()];
 }
 
 /**
@@ -156,10 +174,28 @@ export function resolveMilestones(entries: readonly MilestoneEntry[]): Milestone
 }
 
 // ---------------------------------------------------------------------------
-// corrections.json advisory lock (issue #15) — see appendCorrections's own
-// doc comment for the lock/rename role split. No new runtime dependency: a
-// self-contained fs advisory lock via exclusive file creation (`wx`), same
-// tradition as Node's other zero-dependency lockfile idioms.
+// .moira advisory lock — introduced for corrections.json (issue #15), then
+// generalized to EVERY read-modify-write .moira file (events.json #16;
+// capacity/dates/milestones/labels/members/config #17). A self-contained fs
+// advisory lock via exclusive file creation (`wx`) — no new runtime
+// dependency, same tradition as Node's other zero-dependency lockfile idioms.
+//
+// A "load all → modify → save all" critical section is guarded by TWO
+// independent, complementary mechanisms with distinct jobs — neither alone
+// suffices:
+//   - the advisory LOCK (`<dataPath>.lock`, acquireLock/releaseLock/withLock
+//     below) guards against LOST UPDATES: two concurrent writers each doing
+//     their own load→modify→save would otherwise each load the SAME prior
+//     contents and the later save wins outright, silently discarding the
+//     earlier writer's change. The lock serializes the whole section.
+//   - the temp-file → rename (atomicWriteFileSync — moira-backend's
+//     atomic-write.ts, or a backend store's atomic saveJson) guards against
+//     TORN WRITES: even a SOLE writer's save can be interrupted mid-write
+//     (crash, kill -9); the real path is then only ever seen fully-old or
+//     fully-new, never partial/truncated.
+// The lock says nothing about a torn write from one interrupted writer; the
+// atomic rename says nothing about two writers each innocently recomputing a
+// full contents from a now-stale load.
 // ---------------------------------------------------------------------------
 
 // Bounded — "no silent hang" (moira-verification discipline): a lock that
@@ -195,9 +231,8 @@ interface LockFileContents {
   // acquisition incorrectly delete a LATER, still-live acquisition's lock
   // just because they share a pid. The token makes ownership specific to
   // the exact acquisition, not merely the process. Generated fresh in
-  // `acquireCorrectionsLock` and threaded back to the matching
-  // `releaseCorrectionsLock` call by the caller (`appendCorrections`) —
-  // never read back by `isLockStale` (staleness still keys on `pid` alone,
+  // `acquireLock` and threaded back to the matching `releaseLock` call by
+  // `withLock` — never read back by `isLockStale` (staleness still keys on `pid` alone,
   // per the coordinator's instruction: identifying an ABANDONED lock only
   // needs to know whether ANY process claims that pid, not which specific
   // acquisition it was).
@@ -403,8 +438,23 @@ export class MoiraRepo {
   loadConfig(): MoiraConfig {
     return JSON.parse(readFileSync(this.configPath, 'utf8')) as MoiraConfig;
   }
-  writeConfig(config: MoiraConfig): void {
-    writeFileSync(this.configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+  // Plain full-overwrite writer (atomic; NOT locked) — used by init's seed and,
+  // under the config lock, by updateConfig. Kept private so no caller can bypass
+  // the lock (matching writeMembers/writeLabels); a concurrency-safe
+  // read-modify-write of config.json goes through updateConfig (issue #17).
+  private writeConfig(config: MoiraConfig): void {
+    atomicWriteFileSync(this.configPath, `${JSON.stringify(config, null, 2)}\n`);
+  }
+  /** Concurrency-safe read-modify-write of config.json: merge `patch` over the
+   *  current config inside the advisory lock, persist atomically, and return the
+   *  merged config (issue #17 — the RMW previously lived in cmdConfigOrgCalendar,
+   *  where a save-only lock could not prevent a lost update between two writers). */
+  updateConfig(patch: Partial<MoiraConfig>): MoiraConfig {
+    return this.withLock(this.configPath, () => {
+      const merged = { ...this.loadConfig(), ...patch };
+      this.writeConfig(merged);
+      return merged;
+    });
   }
 
   // --- events ---
@@ -413,10 +463,16 @@ export class MoiraRepo {
     return JSON.parse(readFileSync(this.eventsPath, 'utf8')) as Event[];
   }
   appendEvents(events: readonly Event[]): void {
-    const store = new EventStore();
-    if (existsSync(this.eventsPath)) store.loadJson(this.eventsPath);
-    store.appendAll(events);
-    store.saveJson(this.eventsPath);
+    // load → append → save is a read-modify-write: serialize it under the
+    // events.json advisory lock so a concurrent writer can't load the same
+    // prior log and silently drop this append (lost update, issue #16). The
+    // save itself is atomic (EventStore.saveJson → atomicWriteFileSync).
+    this.withLock(this.eventsPath, () => {
+      const store = new EventStore();
+      if (existsSync(this.eventsPath)) store.loadJson(this.eventsPath);
+      store.appendAll(events);
+      store.saveJson(this.eventsPath);
+    });
   }
 
   // --- corrections (v21/v22 §2.10 third tier; append-only, reason-required) ---
@@ -430,26 +486,11 @@ export class MoiraRepo {
   // validation, which stays fold's job (a foreign patch key is a visible
   // structural error at fold-time, not rejected here).
   //
-  // appendCorrections' critical section (load → append → write) is guarded
-  // by TWO independent, complementary mechanisms with distinct jobs (issue
-  // #15):
-  //   - the advisory LOCK (`<correctionsPath>.lock`, acquireCorrectionsLock/
-  //     releaseCorrectionsLock below) guards against LOST UPDATES — two
-  //     concurrent writers each doing their own "load all → append → save
-  //     all" would otherwise each load the SAME prior contents and the
-  //     later save wins outright, silently discarding the earlier writer's
-  //     append. The lock serializes the whole load→append→write section
-  //     across writers.
-  //   - the temp-file → rename (atomic replace, unchanged from before issue
-  //     #15) guards against TORN WRITES — even a SOLE writer's own save can
-  //     be interrupted mid-write (crash, kill -9); writing to a fresh temp
-  //     path and renaming over the real path means the real path is only
-  //     ever seen as fully-old or fully-new, never a partial/truncated JSON
-  //     file.
-  // Neither alone is sufficient: the lock says nothing about a torn write
-  // from a single interrupted writer; the atomic rename says nothing about
-  // two writers each innocently computing a `[...old, ...new]` from a
-  // now-stale `old`.
+  // appendCorrections' critical section (load → append → write) is guarded by
+  // the advisory lock (against LOST UPDATES) AND the atomic temp→rename
+  // (against TORN WRITES) — see the ".moira advisory lock" section header above
+  // for the full two-mechanism role split (issue #15, generalized to every
+  // read-modify-write .moira file by #16/#17).
   loadCorrections(): Correction[] {
     if (!existsSync(this.correctionsPath)) return [];
     let parsed: unknown;
@@ -467,8 +508,9 @@ export class MoiraRepo {
     return parsed as Correction[];
   }
 
-  private get correctionsLockPath(): string {
-    return `${this.correctionsPath}.lock`;
+  /** The lockfile path guarding writes to `dataPath` (issue #15/#16/#17). */
+  private lockPathFor(dataPath: string): string {
+    return `${dataPath}.lock`;
   }
 
   /** One non-blocking attempt at the exclusive create, stamped with the
@@ -490,7 +532,7 @@ export class MoiraRepo {
    * #15 codex review, new Minor): a live-capture in `tryStealIfStale`
    * permanently abandons its captured file rather than risk an unsafe
    * discard (see that function's doc comment) — over a long-running repo's
-   * lifetime these can accumulate. Called once per `acquireCorrectionsLock`
+   * lifetime these can accumulate. Called once per `acquireLock`
    * invocation (cheap in the common case: an empty/small directory listing
    * and zero matches). Only removes an orphan whose EMBEDDED pid is
    * CONFIRMED DEAD — a still-live one (however it got orphaned) is left
@@ -571,7 +613,7 @@ export class MoiraRepo {
    * place (parked under its unique claimPath — inert, never looked up again,
    * a permanent small leak on this exact rare path) and returns. BUT: by
    * this point `renameSync` has ALREADY vacated `lockPath` — this function
-   * cannot undo that. The caller (`acquireCorrectionsLock`) does NOT know a
+   * cannot undo that. The caller (`acquireLock`) does NOT know a
    * live lock was just displaced and has no signal telling it to stand down;
    * on its very NEXT loop iteration, its own `tryCreateLock(lockPath)` will
    * see an empty path and SUCCEED, entering ITS OWN critical section
@@ -580,7 +622,7 @@ export class MoiraRepo {
    * relocated to one syscall later and gated behind a ≥3-way interleaving
    * (rather than the 2-party race that triggered on every ordinary steal
    * before this fix). The displaced holder itself is not corrupted by any of
-   * this — its own `releaseCorrectionsLock` pid-guard simply no-ops when it
+   * this — its own `releaseLock` pid-guard simply no-ops when it
    * can no longer find its lock — but exclusivity between it and whoever
    * grabs the vacated `lockPath` next is not preserved. Plain POSIX
    * rename/unlink offer no compare-and-swap primitive that would close this
@@ -625,34 +667,38 @@ export class MoiraRepo {
   }
 
   /**
-   * Acquire the corrections.json advisory lock (issue #15). Exclusive create
-   * (`wx`, via `tryCreateLock`) is the actual mutual-exclusion primitive —
-   * two processes racing to create the same path can never both succeed. A
+   * Acquire the advisory lock guarding `dataPath` (issue #15, generalized to
+   * every read-modify-write .moira file by #16/#17). Exclusive create (`wx`,
+   * via `tryCreateLock`) is the actual mutual-exclusion primitive — two
+   * processes racing to create the same lockfile can never both succeed. A
    * fresh per-acquisition TOKEN (issue #15 codex review) is generated here
    * and returned to the caller, which must thread it through to the matching
-   * `releaseCorrectionsLock(token)` call — see `LockFileContents.token`'s
-   * doc comment for why pid alone is not enough to identify ownership. On
-   * contention (EEXIST): opportunistically GC any dead-pid `.steal-*`
-   * orphans from a past live-capture (`gcOrphanedStealFiles`, new Minor —
-   * availability housekeeping, not correctness), attempt a rename-based
-   * steal of an abandoned lock (`tryStealIfStale` — see its own doc comment
-   * for the full design and its honest residual), then back off briefly and
-   * retry, bounded by LOCK_MAX_ATTEMPTS — exhausting the budget is a loud
-   * CliError, never a silent pass-through (a caller that ignored the lock
-   * would reintroduce the exact lost-update this exists to prevent). The
-   * error names the lock path and the (best-effort) current holder pid, and
-   * reads as operator guidance: since a LIVE holder's lock is now never
-   * auto-stolen (see LOCK_STALE_MS's comment), a wedged-but-alive holder
-   * genuinely requires a human to intervene — this is not something the
-   * retry loop can resolve for itself, and the message says so rather than
-   * implying it will eventually clear on its own. M-2 (issue #15 review): a
-   * steal that lands on the FINAL budgeted attempt would otherwise be
-   * wasted — we'd throw despite having just cleared the contention
-   * ourselves — so the last attempt gets one immediate extra
+   * `releaseLock(dataPath, token)` call — see `LockFileContents.token`'s
+   * doc comment for why pid alone is not enough to identify ownership.
+   * (Callers should almost always use `withLock`, which pairs acquire/release
+   * in a `try/finally`; the raw pair is used directly only by the lock's own
+   * unit tests.) On contention (EEXIST): opportunistically GC any dead-pid
+   * `.steal-*` orphans from a past live-capture (`gcOrphanedStealFiles`, new
+   * Minor — availability housekeeping, not correctness), attempt a
+   * rename-based steal of an abandoned lock (`tryStealIfStale` — see its own
+   * doc comment for the full design and its honest residual), then back off
+   * briefly and retry, bounded by LOCK_MAX_ATTEMPTS — exhausting the budget
+   * is a loud CliError, never a silent pass-through (a caller that ignored
+   * the lock would reintroduce the exact lost-update this exists to prevent).
+   * The error names the data file, its lock path, and the (best-effort)
+   * current holder pid, and reads as operator guidance: since a LIVE holder's
+   * lock is now never auto-stolen (see LOCK_STALE_MS's comment), a
+   * wedged-but-alive holder genuinely requires a human to intervene — this is
+   * not something the retry loop can resolve for itself, and the message says
+   * so rather than implying it will eventually clear on its own. M-2 (issue
+   * #15 review): a steal that lands on the FINAL budgeted attempt would
+   * otherwise be wasted — we'd throw despite having just cleared the
+   * contention ourselves — so the last attempt gets one immediate extra
    * `tryCreateLock` before giving up.
    */
-  private acquireCorrectionsLock(): string {
-    const lockPath = this.correctionsLockPath;
+  private acquireLock(dataPath: string): string {
+    const lockPath = this.lockPathFor(dataPath);
+    const label = basename(dataPath);
     const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     this.gcOrphanedStealFiles(lockPath);
     for (let attempt = 1; attempt <= LOCK_MAX_ATTEMPTS; attempt += 1) {
@@ -662,7 +708,7 @@ export class MoiraRepo {
         if (this.tryCreateLock(lockPath, token)) return token; // M-2: cash in a steal that just happened on this final attempt
         const holderPid = readLockHolderPid(lockPath);
         throw new CliError(
-          `corrections.json の書き込みロックを取得できませんでした（${lockPath}` +
+          `${label} の書き込みロックを取得できませんでした（${lockPath}` +
             (holderPid !== undefined ? `, 保持プロセス pid=${holderPid}` : ', 保持プロセス pid 不明') +
             `）。保持プロセスが生存している場合、自動では解除されません——処理の完了を待つか、` +
             `そのプロセスが実際には停止していることを確認したうえで、ロックファイルを手動で削除してください。`,
@@ -672,13 +718,13 @@ export class MoiraRepo {
     }
     // Unreachable — the loop above always either returns or throws on its
     // LOCK_MAX_ATTEMPTS-th iteration; this satisfies the compiler only.
-    throw new CliError('corrections.json の書き込みロック取得ループが異常終了しました（到達しないはずの経路）');
+    throw new CliError(`${basename(dataPath)} の書き込みロック取得ループが異常終了しました（到達しないはずの経路）`);
   }
 
   /**
-   * Unlink the lock ONLY if it is still stamped with BOTH our pid AND the
-   * exact per-acquisition `token` returned by the matching
-   * `acquireCorrectionsLock` call — never unconditionally, and (issue #15
+   * Unlink the lock guarding `dataPath` ONLY if it is still stamped with BOTH
+   * our pid AND the exact per-acquisition `token` returned by the matching
+   * `acquireLock(dataPath)` call — never unconditionally, and (issue #15
    * codex review, NOT-FIXED item addressed here) never on pid alone.
    *
    * Why pid alone was insufficient: pid identifies a PROCESS, not a
@@ -716,46 +762,50 @@ export class MoiraRepo {
    * lock (stays parked until manually cleared or the reused pid exits) —
    * not a correctness violation; nothing gets double-written.
    */
-  private releaseCorrectionsLock(token: string): void {
+  private releaseLock(dataPath: string, token: string): void {
+    const lockPath = this.lockPathFor(dataPath);
     let owned = false;
     try {
-      const parsed = JSON.parse(readFileSync(this.correctionsLockPath, 'utf8')) as
-        Partial<LockFileContents>;
+      const parsed = JSON.parse(readFileSync(lockPath, 'utf8')) as Partial<LockFileContents>;
       owned = parsed.pid === process.pid && parsed.token === token;
     } catch {
       return; // gone or unreadable — nothing of ours left to release
     }
     if (!owned) return; // not THIS acquisition's lock (stolen, or a different acquisition by the same pid) — not ours to delete
     try {
-      unlinkSync(this.correctionsLockPath);
+      unlinkSync(lockPath);
     } catch {
       // already gone (e.g. raced with a steal between our read and unlink
       // above — the residual TOCTOU noted in the doc comment) — no-op
     }
   }
 
-  appendCorrections(recs: readonly Correction[]): void {
-    const lockToken = this.acquireCorrectionsLock();
+  /**
+   * Run `fn` while holding the advisory lock for `dataPath`, releasing it in a
+   * `finally` no matter how `fn` exits. This is the ONE way the read-modify-
+   * write methods below serialize their load→modify→save critical sections
+   * (issue #15/#16/#17); acquireLock/releaseLock are exposed as a raw pair only
+   * for the lock's own unit tests. `fn`'s own atomic save (atomicWriteFileSync,
+   * or a backend store's atomic saveJson) still handles torn writes — the lock
+   * only handles lost updates (see the section header for the role split).
+   */
+  private withLock<T>(dataPath: string, fn: () => T): T {
+    const token = this.acquireLock(dataPath);
     try {
-      const all = [...this.loadCorrections(), ...recs];
-      const tmp = `${this.correctionsPath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      writeFileSync(tmp, `${JSON.stringify(all, null, 2)}\n`, 'utf8');
-      try {
-        renameSync(tmp, this.correctionsPath); // atomic replace — no torn/partial write on interruption
-      } catch (e) {
-        // issue #15 codex review (Minor): a failed rename must not leak the
-        // temp file — best-effort cleanup, then surface the ORIGINAL error
-        // (the temp-file removal itself is not the interesting failure).
-        try {
-          unlinkSync(tmp);
-        } catch {
-          // couldn't clean up either — nothing more we can do here
-        }
-        throw e;
-      }
+      return fn();
     } finally {
-      this.releaseCorrectionsLock(lockToken);
+      this.releaseLock(dataPath, token);
     }
+  }
+
+  appendCorrections(recs: readonly Correction[]): void {
+    // load → append → save (RMW): serialized by the advisory lock against LOST
+    // UPDATES, persisted atomically against TORN WRITES (issue #11 introduced
+    // the atomic replace here; #15 added the lock; #16/#17 generalized both).
+    this.withLock(this.correctionsPath, () => {
+      const all = [...this.loadCorrections(), ...recs];
+      atomicWriteFileSync(this.correctionsPath, `${JSON.stringify(all, null, 2)}\n`);
+    });
   }
 
   // --- capacity ---
@@ -764,10 +814,15 @@ export class MoiraRepo {
     return JSON.parse(readFileSync(this.capacityPath, 'utf8')) as CapacityEntry[];
   }
   appendCapacity(entries: readonly CapacityEntry[]): void {
-    const store = new CapacityStore();
-    if (existsSync(this.capacityPath)) store.loadJson(this.capacityPath);
-    store.appendAll(entries);
-    store.saveJson(this.capacityPath);
+    // load → append → save (RMW): serialized by the advisory lock against LOST
+    // UPDATES; the save is atomic (CapacityStore.saveJson → atomicWriteFileSync)
+    // against TORN WRITES (issue #17).
+    this.withLock(this.capacityPath, () => {
+      const store = new CapacityStore();
+      if (existsSync(this.capacityPath)) store.loadJson(this.capacityPath);
+      store.appendAll(entries);
+      store.saveJson(this.capacityPath);
+    });
   }
 
   // --- reference dates (R-T6 second tier; append-only, latest-ts wins) ---
@@ -776,8 +831,12 @@ export class MoiraRepo {
     return JSON.parse(readFileSync(this.datesPath, 'utf8')) as ReferenceDateEntry[];
   }
   appendDateEntries(entries: readonly ReferenceDateEntry[]): void {
-    const all = [...this.loadDateEntries(), ...entries];
-    writeFileSync(this.datesPath, `${JSON.stringify(all, null, 2)}\n`, 'utf8');
+    // load → append → save (RMW): lock against LOST UPDATES + atomic replace
+    // against TORN WRITES (issue #17).
+    this.withLock(this.datesPath, () => {
+      const all = [...this.loadDateEntries(), ...entries];
+      atomicWriteFileSync(this.datesPath, `${JSON.stringify(all, null, 2)}\n`);
+    });
   }
 
   // --- milestones (name+node-bundle second tier; append-only, latest-ts wins per name — issue #35) ---
@@ -786,8 +845,12 @@ export class MoiraRepo {
     return JSON.parse(readFileSync(this.milestonesPath, 'utf8')) as MilestoneEntry[];
   }
   appendMilestoneEntries(entries: readonly MilestoneEntry[]): void {
-    const all = [...this.loadMilestoneEntries(), ...entries];
-    writeFileSync(this.milestonesPath, `${JSON.stringify(all, null, 2)}\n`, 'utf8');
+    // load → append → save (RMW): lock against LOST UPDATES + atomic replace
+    // against TORN WRITES (issue #17).
+    this.withLock(this.milestonesPath, () => {
+      const all = [...this.loadMilestoneEntries(), ...entries];
+      atomicWriteFileSync(this.milestonesPath, `${JSON.stringify(all, null, 2)}\n`);
+    });
   }
 
   // --- labels (presentation-only) ---
@@ -795,29 +858,41 @@ export class MoiraRepo {
     if (!existsSync(this.labelsPath)) return { nodeLabels: {}, actorLabels: {} };
     return JSON.parse(readFileSync(this.labelsPath, 'utf8')) as Labels;
   }
+  // Plain full-overwrite writer (atomic; NOT locked) — used by init's seed and,
+  // under the labels lock, by the four RMW setters below. Each setter does a
+  // load→modify→write, so it must hold the lock across the whole section (issue
+  // #17); this low-level writer only guarantees the write itself is atomic.
   private writeLabels(labels: Labels): void {
-    writeFileSync(this.labelsPath, `${JSON.stringify(labels, null, 2)}\n`, 'utf8');
+    atomicWriteFileSync(this.labelsPath, `${JSON.stringify(labels, null, 2)}\n`);
   }
   setNodeLabel(node: string, label: string): void {
-    const labels = this.loadLabels();
-    labels.nodeLabels[node] = label;
-    this.writeLabels(labels);
+    this.withLock(this.labelsPath, () => {
+      const labels = this.loadLabels();
+      labels.nodeLabels[node] = label;
+      this.writeLabels(labels);
+    });
   }
   setActorLabel(id: string, label: string): void {
-    const labels = this.loadLabels();
-    labels.actorLabels[id] = label;
-    this.writeLabels(labels);
+    this.withLock(this.labelsPath, () => {
+      const labels = this.loadLabels();
+      labels.actorLabels[id] = label;
+      this.writeLabels(labels);
+    });
   }
   // Bulk variants for `import wbs` — one load + one write (avoid O(n²) per-row I/O).
   setNodeLabels(map: Record<string, string>): void {
-    const labels = this.loadLabels();
-    Object.assign(labels.nodeLabels, map);
-    this.writeLabels(labels);
+    this.withLock(this.labelsPath, () => {
+      const labels = this.loadLabels();
+      Object.assign(labels.nodeLabels, map);
+      this.writeLabels(labels);
+    });
   }
   setActorLabels(map: Record<string, string>): void {
-    const labels = this.loadLabels();
-    Object.assign(labels.actorLabels, map);
-    this.writeLabels(labels);
+    this.withLock(this.labelsPath, () => {
+      const labels = this.loadLabels();
+      Object.assign(labels.actorLabels, map);
+      this.writeLabels(labels);
+    });
   }
 
   // --- members (the roster; separate tier, NOT events — D-16/D-30) ---
@@ -825,7 +900,47 @@ export class MoiraRepo {
     if (!existsSync(this.membersPath)) return [];
     return JSON.parse(readFileSync(this.membersPath, 'utf8')) as Member[];
   }
-  saveMembers(members: readonly Member[]): void {
-    writeFileSync(this.membersPath, `${JSON.stringify(members, null, 2)}\n`, 'utf8');
+  // Plain full-overwrite writer (atomic; NOT locked) — used under the members
+  // lock by upsertMember/upsertMembers. Kept private so no caller can bypass the
+  // lock (issue #17): every roster write is a locked read-modify-write, never a
+  // load-outside-then-overwrite (the exact shape that lost a concurrent add).
+  private writeMembers(members: readonly Member[]): void {
+    atomicWriteFileSync(this.membersPath, `${JSON.stringify(members, null, 2)}\n`);
+  }
+  /**
+   * Concurrency-safe read-modify-write of members.json: add `member`, or
+   * replace the existing entry with the same id, under the advisory lock —
+   * returns true iff an existing member was replaced (issue #17 — the RMW
+   * previously lived in cmdMemberAdd, where a save-only lock could not have
+   * prevented a lost update between two concurrent `member add` writers).
+   */
+  upsertMember(member: Member): boolean {
+    return this.withLock(this.membersPath, () => {
+      const members = this.loadMembers();
+      const idx = members.findIndex((m) => m.id === member.id);
+      const replaced = idx >= 0;
+      if (replaced) members[idx] = member;
+      else members.push(member);
+      this.writeMembers(members);
+      return replaced;
+    });
+  }
+  /**
+   * Bulk concurrency-safe read-modify-write of members.json for `import
+   * members`: re-load the roster INSIDE the lock and `mergeRoster` `incoming`
+   * onto it (overwrite-by-id in place, append new), then write — returning the
+   * merged roster. This replaces the former `saveMembers(plan.members)`, whose
+   * load lived in the command layer OUTSIDE any lock, so a save-only lock could
+   * not stop a concurrent `member add` from being clobbered by the wholesale
+   * overwrite (issue #17 — the import path is another real members RMW;
+   * extends HA option A to it). The merge reuses the SAME `mergeRoster` the
+   * dry-run preview used, so a non-contended import writes byte-identical bytes.
+   */
+  upsertMembers(incoming: readonly Member[]): Member[] {
+    return this.withLock(this.membersPath, () => {
+      const merged = mergeRoster(this.loadMembers(), incoming);
+      this.writeMembers(merged);
+      return merged;
+    });
   }
 }

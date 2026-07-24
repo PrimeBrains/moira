@@ -2,7 +2,8 @@
 // derived state is always recomputed from it (R-S2 MODEL:283), never mutated
 // in place (R-U2 MODEL:215).
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { atomicWriteFileSync } from './atomic-write.js';
 import type { Event } from './types.js';
 
 /**
@@ -45,6 +46,11 @@ export class EventStore {
   }
 
   saveJson(path: string): void {
-    writeFileSync(path, JSON.stringify(this.all(), null, 2), 'utf8');
+    // Atomic replace (temp→rename) guards against torn writes — a crash/kill
+    // mid-write can no longer leave a partial events.json (issue #16). Output
+    // bytes are unchanged (no trailing newline, as before). Concurrent
+    // read-modify-write (MoiraRepo.appendEvents) is serialized SEPARATELY by
+    // the CLI's advisory lock — see moira/cli/src/store.ts.
+    atomicWriteFileSync(path, JSON.stringify(this.all(), null, 2));
   }
 }

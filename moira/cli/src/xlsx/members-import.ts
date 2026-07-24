@@ -18,7 +18,7 @@ import type { CapacityEntry } from 'moira-backend';
 import { parseActor } from '../actors.js';
 import { capacityEntry } from '../emit.js';
 import type { Stamper } from '../stamp.js';
-import type { Member } from '../store.js';
+import { mergeRoster, type Member } from '../store.js';
 import { cellIsoDate, cellNumber, cellString } from './util.js';
 
 export interface MemberRow {
@@ -156,8 +156,16 @@ export function validateMembersImport(
 // --- plan -------------------------------------------------------------------
 
 export interface MembersImportPlan {
-  /** the roster after upsert (existing ∪ file; file wins on label/defaultCapacity). */
+  /** the roster after upsert (existing ∪ file; file wins on label/defaultCapacity)
+   *  — a SNAPSHOT preview built from the load-time `existing`. The dry-run count
+   *  and holiday-expansion humans read from this; the COMMITTED roster is
+   *  re-merged inside the lock by `MoiraRepo.upsertMembers(incomingMembers)`
+   *  (issue #17 — never clobbers a concurrent `member add`). */
   members: Member[];
+  /** the file's own Member records (the upsert INPUT) — handed to
+   *  `upsertMembers` so the locked commit re-merges them onto a FRESH roster read
+   *  rather than saving a stale wholesale snapshot. */
+  incomingMembers: Member[];
   /** id → 氏名, for a single setActorLabels call. */
   actorLabels: Record<string, string>;
   /** all capacity rows (personal calendar + holiday × human), ONE append. */
@@ -181,19 +189,22 @@ export function planMembersImport(
 ): MembersImportPlan {
   const warnings: string[] = [];
 
-  // upsert roster: start from existing, overwrite/append with file rows. Ids are
-  // normalized to the bare Actor.id space (parseActor) so a roster entry matches
-  // the assignee/label/capacity ids the rest of the system uses.
-  const byId = new Map<string, Member>(existing.map((e) => [e.id, e]));
+  // Build the file's own Member records (the upsert INPUT). Ids are normalized to
+  // the bare Actor.id space (parseActor) so a roster entry matches the
+  // assignee/label/capacity ids the rest of the system uses.
+  const incomingMembers: Member[] = [];
   const actorLabels: Record<string, string> = {};
   for (const m of members) {
     const actor = parseActor(m.id);
     const member: Member = { id: actor.id, kind: actor.kind, label: m.name };
     if (m.defaultCapacity !== null) member.defaultCapacity = m.defaultCapacity;
-    byId.set(actor.id, member);
+    incomingMembers.push(member);
     actorLabels[actor.id] = m.name;
   }
-  const roster = [...byId.values()];
+  // Preview roster = load-time existing ∪ file, via the SAME shared merge the
+  // locked commit (upsertMembers) uses — so a non-contended import's preview and
+  // its committed roster are byte-identical.
+  const roster = mergeRoster(existing, incomingMembers);
 
   const capacityEntries: CapacityEntry[] = [];
 
@@ -229,5 +240,5 @@ export function planMembersImport(
     }
   }
 
-  return { members: roster, actorLabels, capacityEntries, warnings };
+  return { members: roster, incomingMembers, actorLabels, capacityEntries, warnings };
 }
