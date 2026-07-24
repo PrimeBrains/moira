@@ -8,13 +8,53 @@ import { EVM } from '../../theme/tokens';
 import { Bar, Card, Pill, SectionTitle } from '../../theme/atoms';
 import { useMoira } from '../../moira/hooks';
 import { labelOf } from '../../moira/labels';
-import { assigneeOptions, buildGanttModel, DEFAULT_ROW_FILTER, type RowFilter } from './gantt-geometry';
+import {
+  assigneeOptions,
+  buildGanttModel,
+  DEFAULT_DATE_SOURCE_MODE,
+  DEFAULT_ROW_FILTER,
+  type DateSourceMode,
+  type RowFilter,
+} from './gantt-geometry';
 import { GanttFilterBar } from './GanttFilterBar';
 import { ScheduleGantt } from './ScheduleGantt';
 import { Inspector } from './Inspector';
 import type { NodeId } from '../../moira/engine';
 
 type Kind = 'all' | 'human' | 'agent';
+
+// Label-pane date-source mode persistence (D-81 / issue #9). localStorage-only
+// (URL query is out of scope per the issue #9 HA boundary call). A missing or
+// malformed value falls back to the default (predicted = current behavior), the
+// same honest-default posture as readLabelW in ScheduleGantt — a corrupt key
+// never invents a mode the user did not choose.
+const DATE_SOURCE_KEY = 'moira.schedule.dateSource';
+const DATE_SOURCE_MODES: readonly DateSourceMode[] = ['predicted', 'baseline', 'both'];
+function isDateSourceMode(v: string | null): v is DateSourceMode {
+  return v === 'predicted' || v === 'baseline' || v === 'both';
+}
+function readDateSource(): DateSourceMode {
+  try {
+    const raw = localStorage.getItem(DATE_SOURCE_KEY);
+    if (isDateSourceMode(raw)) return raw;
+  } catch { /* localStorage unavailable (node/test) */ }
+  return DEFAULT_DATE_SOURCE_MODE;
+}
+function writeDateSource(m: DateSourceMode): void {
+  try {
+    localStorage.setItem(DATE_SOURCE_KEY, m);
+  } catch { /* localStorage unavailable (node/test) */ }
+}
+const dateSourceLabel: Record<DateSourceMode, string> = {
+  predicted: '予測',
+  baseline: '基準線',
+  both: '両方',
+};
+const dateSourceTitle: Record<DateSourceMode, string> = {
+  predicted: '生きた予測を主に表示（既定・現行挙動）',
+  baseline: '基準線（凍結された基準完了日と近似の基準開始日）だけを表示。未凍結の葉は「—」',
+  both: '「基準線 → 予測」の 2 値を並記',
+};
 
 export function ScheduleTimeSurface() {
   const { projected, derived, asOf, criticalPath, plannedCost } = useMoira();
@@ -23,6 +63,13 @@ export function ScheduleTimeSurface() {
   const [showWeeks, setShowWeeks] = useState(true); // issue #28 — week gridlines (default on)
   const [showDays, setShowDays] = useState(false); // issue #28 — day gridlines (default off)
   const [showDeps, setShowDeps] = useState(false); // issue #29 — dependency lines (default off)
+  // Label-pane 開始／終了 column date source (D-81 / issue #9). Restored from
+  // localStorage (default 'predicted' = current behavior); persisted on change.
+  const [dateSource, setDateSource] = useState<DateSourceMode>(readDateSource);
+  const changeDateSource = (m: DateSourceMode): void => {
+    setDateSource(m);
+    writeDateSource(m);
+  };
 
   const model = useMemo(
     () => buildGanttModel(projected, derived, filter, plannedCost),
@@ -123,17 +170,46 @@ export function ScheduleTimeSurface() {
         <Card pad={10}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
             <SectionTitle hint="凍結ベースライン(PMB) ＋ 生きた予測(EAC)">Gantt</SectionTitle>
-            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontSize: 11, color: EVM.ink3 }}>表示</span>
-              <GanttToggle testid="grid-weeks" on={showWeeks} onClick={() => setShowWeeks((v) => !v)}>
-                週境界
-              </GanttToggle>
-              <GanttToggle testid="grid-days" on={showDays} onClick={() => setShowDays((v) => !v)}>
-                日境界
-              </GanttToggle>
-              <GanttToggle testid="dep-toggle" on={showDeps} onClick={() => setShowDeps((v) => !v)}>
-                依存線
-              </GanttToggle>
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              {/* date-source selector (D-81 / issue #9) — chooses what the label
+                  pane's 開始／終了 columns show; display-layer only (Inspector,
+                  bar drawing, progress filter, EVM all unchanged). */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 11, color: EVM.ink3 }}>日付ソース</span>
+                {DATE_SOURCE_MODES.map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => changeDateSource(m)}
+                    data-testid={`date-source:${m}`}
+                    aria-pressed={dateSource === m}
+                    title={dateSourceTitle[m]}
+                    style={{
+                      fontSize: 11.5,
+                      border: `1px solid ${dateSource === m ? EVM.brandDeep : EVM.rule}`,
+                      background: dateSource === m ? EVM.brandSoft : EVM.paperWarm,
+                      color: dateSource === m ? EVM.brandDeep : EVM.ink2,
+                      borderRadius: 999,
+                      padding: '3px 11px',
+                      cursor: 'pointer',
+                      fontWeight: dateSource === m ? 600 : 400,
+                    }}
+                  >
+                    {dateSourceLabel[m]}
+                  </button>
+                ))}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 11, color: EVM.ink3 }}>表示</span>
+                <GanttToggle testid="grid-weeks" on={showWeeks} onClick={() => setShowWeeks((v) => !v)}>
+                  週境界
+                </GanttToggle>
+                <GanttToggle testid="grid-days" on={showDays} onClick={() => setShowDays((v) => !v)}>
+                  日境界
+                </GanttToggle>
+                <GanttToggle testid="dep-toggle" on={showDeps} onClick={() => setShowDeps((v) => !v)}>
+                  依存線
+                </GanttToggle>
+              </div>
             </div>
           </div>
           {model.rows.length === 0 ? (
@@ -151,6 +227,7 @@ export function ScheduleTimeSurface() {
               showWeeks={showWeeks}
               showDays={showDays}
               showDeps={showDeps}
+              dateSource={dateSource}
             />
           )}
         </Card>
