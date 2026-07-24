@@ -70,12 +70,37 @@ export interface GanttRow {
   /** planned start (issue #34): leaf = predictedStart (first day the leveler
    *  actually consumed capacity) ?? an approximation (frozenSlot minus the
    *  nominal duration) ?? null. Parent = min over descendant plannedStart
-   *  (dateSpanOf, display-only projection — no metric recomputation). */
+   *  (dateSpanOf, display-only projection — no metric recomputation). Reflects
+   *  the *predicted-first* semantics — the current-behavior projection preserved
+   *  under D-81. */
   plannedStart: IsoDate | null;
   /** planned end (issue #34): leaf = predicted (live forecast completion) ??
-   *  frozenSlot (frozen baseline). Parent = max over descendant plannedEnd. */
+   *  frozenSlot (frozen baseline). Parent = max over descendant plannedEnd.
+   *  Predicted-first semantics — see plannedStart. */
   plannedEnd: IsoDate | null;
+  /** baseline-mode planned start (D-81 / issue #9): leaf = frozenSlot minus
+   *  nominalDuration (the "近似の基準開始日" approximation D-76 kept at the display
+   *  layer — no canonical frozen basis-start attribute) OR null when the leaf has
+   *  no frozenSlot (baseline mode does NOT fall back to predicted — the third
+   *  state / unscheduled leaves stay '—' per D-81; visible-gap warning is
+   *  preserved by the unchanged bar layer). Parent = min over descendant
+   *  plannedStartBaseline. */
+  plannedStartBaseline: IsoDate | null;
+  /** baseline-mode planned end (D-81 / issue #9): leaf = frozenSlot itself OR
+   *  null. Baseline mode does NOT fall back to predicted. Parent = max over
+   *  descendant plannedEndBaseline. */
+  plannedEndBaseline: IsoDate | null;
 }
+
+/** Label-pane date-source mode (D-81 / issue #9). The Gantt label pane's
+ *  「開始」「終了」columns can be shown as: the live prediction (current default),
+ *  the frozen baseline only, or both side-by-side. Mode selection is purely
+ *  display-layer — Inspector, bar drawing, progress filter, EVM decisions, and
+ *  parent-row rollup all stay unchanged across modes (see D-81 body). */
+export type DateSourceMode = 'predicted' | 'baseline' | 'both';
+
+/** Default date-source mode = current behavior (predicted-first) per D-81. */
+export const DEFAULT_DATE_SOURCE_MODE: DateSourceMode = 'predicted';
 
 export interface GanttModel {
   rows: GanttRow[];
@@ -430,6 +455,31 @@ export function dateSpanOf(
   return { start, end };
 }
 
+/** Baseline-mode span rollup for parent rows (D-81 / issue #9). Same shape as
+ *  dateSpanOf but reads plannedStartBaseline/plannedEndBaseline instead of the
+ *  predicted-first fields, so partial baseline coverage of a subtree stays
+ *  honest at the parent row (a baseline-null child is skipped in the min/max
+ *  reduction, and the parent's value reflects only the baseline-scheduled
+ *  descendants — the unscheduled child is still visible via the row filter). */
+export function baselineSpanOf(
+  rows: readonly GanttRow[],
+  i: number,
+): { start: IsoDate | null; end: IsoDate | null } {
+  const parent = rows[i]!;
+  let start: IsoDate | null = null;
+  let end: IsoDate | null = null;
+  for (let j = i + 1; j < rows.length && rows[j]!.depth > parent.depth; j += 1) {
+    const r = rows[j]!;
+    if (r.plannedStartBaseline !== null) {
+      start = start === null ? r.plannedStartBaseline : minIso(start, r.plannedStartBaseline);
+    }
+    if (r.plannedEndBaseline !== null) {
+      end = end === null ? r.plannedEndBaseline : maxIso(end, r.plannedEndBaseline);
+    }
+  }
+  return { start, end };
+}
+
 export function buildGanttModel(
   projected: ProjectedState,
   derived: DerivedState,
@@ -476,6 +526,14 @@ export function buildGanttModel(
       ? (predictedStart ?? (frozenSlot !== null ? addDaysIso(frozenSlot, -nomDays) : null))
       : null;
     const plannedEnd = isLeaf ? (predicted ?? frozenSlot) : null;
+    // Baseline-mode leaf values (D-81 / issue #9): frozenSlot minus nomDays for
+    // start (the D-76 approximation, kept at the display layer), frozenSlot for
+    // end. When frozenSlot is null we return null — baseline mode does NOT fall
+    // back to predicted, so the leaf's third-state visibility is preserved
+    // (both columns show '—'; the bar layer still shows the visible-gap band
+    // for complete-unscheduled leaves independent of mode).
+    const plannedStartBaseline = isLeaf && frozenSlot !== null ? addDaysIso(frozenSlot, -nomDays) : null;
+    const plannedEndBaseline = isLeaf ? frozenSlot : null;
 
     // Pass 1: emit EVERY effective node (contextOnly:false). Filtering happens
     // in a second pass so the date window below stays filter-independent.
@@ -501,6 +559,8 @@ export function buildGanttModel(
       plannedCost: plannedCostMap.get(id) ?? null,
       plannedStart,
       plannedEnd,
+      plannedStartBaseline,
+      plannedEndBaseline,
     });
     if (frozenSlot !== null) dates.push(frozenSlot);
     if (predicted !== null) dates.push(predicted);
@@ -516,12 +576,24 @@ export function buildGanttModel(
   // Post-pass: fill non-leaf plannedStart/plannedEnd via dateSpanOf. rows[] is
   // DFS-preorder, so every descendant of row i sits at a HIGHER index than i —
   // walking backwards guarantees a parent's own descendants (leaf or nested
-  // parent) are already resolved by the time we reach it.
+  // parent) are already resolved by the time we reach it. Both the predicted-
+  // first fields (plannedStart/plannedEnd) and the baseline-mode fields
+  // (plannedStartBaseline/plannedEndBaseline) are rolled up per-mode so
+  // partial-baseline coverage stays honest at the parent (D-81: parent rollup
+  // is mode-agnostic in the sense that the same shape applies to each mode,
+  // not that modes share a single rolled-up value).
   for (let i = rows.length - 1; i >= 0; i -= 1) {
     const r = rows[i]!;
     if (r.isLeaf) continue;
     const span = dateSpanOf(rows, i);
-    rows[i] = { ...r, plannedStart: span.start, plannedEnd: span.end };
+    const spanBaseline = baselineSpanOf(rows, i);
+    rows[i] = {
+      ...r,
+      plannedStart: span.start,
+      plannedEnd: span.end,
+      plannedStartBaseline: spanBaseline.start,
+      plannedEndBaseline: spanBaseline.end,
+    };
   }
 
   let start = dates[0]!;

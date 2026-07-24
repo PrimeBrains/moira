@@ -8,7 +8,9 @@ import { describe, expect, it } from 'vitest';
 import { computePlannedCost, derive, fold } from '../../moira/engine';
 import type { Actor, DependencyEdge, Event, IsoDate, NodeId } from '../../moira/engine';
 import {
+  addDaysIso,
   assigneeOptions,
+  baselineSpanOf,
   buildAxisTicks,
   buildGanttModel,
   dateSpanOf,
@@ -16,6 +18,8 @@ import {
   depSegments,
   type GanttRow,
   leafMatches,
+  maxIso,
+  minIso,
   orderSiblings,
   predecessorsOf,
   type RowFilter,
@@ -148,6 +152,8 @@ const row = (o: Partial<GanttRow>): GanttRow => ({
   plannedCost: null,
   plannedStart: null,
   plannedEnd: null,
+  plannedStartBaseline: null,
+  plannedEndBaseline: null,
   ...o,
 });
 const withF = (o: Partial<RowFilter>): RowFilter => ({ ...DEFAULT_ROW_FILTER, ...o });
@@ -516,6 +522,59 @@ describe('dateSpanOf', () => {
   });
 });
 
+// ---- baseline-mode span rollup (D-81 / issue #9) -----------------------------
+// baselineSpanOf mirrors dateSpanOf's contiguous-descendant-block min/max, but
+// reads the frozenSlot-based plannedStartBaseline/plannedEndBaseline fields — the
+// two rollups must stay independent so a mode switch never leaks the other mode's
+// values into a parent row.
+
+describe('baselineSpanOf', () => {
+  it('returns the min plannedStartBaseline / max plannedEndBaseline over the contiguous descendant block', () => {
+    const rows: GanttRow[] = [
+      row({ node: 'p', depth: 0, isLeaf: false }),
+      row({ node: 'c1', depth: 1, isLeaf: true, plannedStartBaseline: '2026-01-05', plannedEndBaseline: '2026-01-08' }),
+      row({ node: 'c2', depth: 1, isLeaf: true, plannedStartBaseline: '2026-01-02', plannedEndBaseline: '2026-01-06' }),
+    ];
+    expect(baselineSpanOf(rows, 0)).toEqual({ start: '2026-01-02', end: '2026-01-08' });
+  });
+
+  it('ignores descendants whose baseline fields are null (partial baseline coverage stays honest at the parent)', () => {
+    const rows: GanttRow[] = [
+      row({ node: 'p', depth: 0, isLeaf: false }),
+      row({ node: 'c1', depth: 1, isLeaf: true, plannedStartBaseline: null, plannedEndBaseline: null }),
+      row({ node: 'c2', depth: 1, isLeaf: true, plannedStartBaseline: '2026-01-03', plannedEndBaseline: '2026-01-04' }),
+    ];
+    expect(baselineSpanOf(rows, 0)).toEqual({ start: '2026-01-03', end: '2026-01-04' });
+  });
+
+  it('returns null/null when every descendant baseline is null (an all-unfrozen subtree stays "—")', () => {
+    const rows: GanttRow[] = [
+      row({ node: 'p', depth: 0, isLeaf: false }),
+      row({ node: 'c1', depth: 1, isLeaf: true, plannedStartBaseline: null, plannedEndBaseline: null }),
+    ];
+    expect(baselineSpanOf(rows, 0)).toEqual({ start: null, end: null });
+  });
+
+  it('reads the baseline fields, NOT the predicted-first plannedStart/plannedEnd — the two rollups are independent', () => {
+    // one leaf whose predicted-first span and baseline span deliberately DIVERGE;
+    // baselineSpanOf must pull the baseline pair and dateSpanOf the predicted pair.
+    const rows: GanttRow[] = [
+      row({ node: 'p', depth: 0, isLeaf: false }),
+      row({
+        node: 'c1',
+        depth: 1,
+        isLeaf: true,
+        plannedStart: '2026-02-01',
+        plannedEnd: '2026-02-10',
+        plannedStartBaseline: '2026-01-05',
+        plannedEndBaseline: '2026-01-08',
+      }),
+    ];
+    expect(baselineSpanOf(rows, 0)).toEqual({ start: '2026-01-05', end: '2026-01-08' });
+    expect(dateSpanOf(rows, 0)).toEqual({ start: '2026-02-01', end: '2026-02-10' });
+  });
+});
+
 describe('buildGanttModel planned metrics', () => {
   // feat/a: assigned + scheduled + AGREED with an explicit frozenBudget=10 that
   //   deliberately DIFFERS from its latestEstimate=4 — the plannedCost assertion
@@ -639,5 +698,92 @@ describe('buildGanttModel planned metrics', () => {
     const parent = model.rows.find((r) => r.node === 'feat4')!;
     expect(parent.plannedStart).toBe('2026-01-10'); // min(a=01-10, b=01-14)
     expect(parent.plannedEnd).toBe('2026-01-16'); // max(a=01-13, b=01-16)
+  });
+});
+
+// ---- baseline-mode fields (D-81 / issue #9) ---------------------------------
+// buildGanttModel now emits, per leaf, a frozenSlot-only baseline pair
+// (plannedStartBaseline = frozenSlot − nominalDuration; plannedEndBaseline =
+// frozenSlot) and rolls it up per-mode. Reuses the same plannedEvents fixture as
+// the predicted-first tests above so the two modes can be compared side by side
+// on the SAME tree (feat/a carries a live forecast that diverges from its frozen
+// baseline; that divergence is exactly what separates the two modes).
+
+describe('buildGanttModel baseline-mode fields', () => {
+  const plannedEvents = (): Event[] => [
+    est('appB', [{ node: 'featB' }]),
+    est('featB', [{ node: 'featB/a', estimate: 4 }, { node: 'featB/b', estimate: 3 }]),
+    schedule('featB/a', me, '2026-01-10'),
+    schedule('featB/b', ai, '2026-01-11'),
+    {
+      kind: 'transition',
+      ...stamp(),
+      actor: me,
+      node: 'featB/a',
+      machine: 'estimate-agreement',
+      to: 'agreed',
+      frozenBudget: 10,
+    },
+  ];
+  const buildPlanned = (events: Event[]) => {
+    const projected = fold(events);
+    const derived = derive(events, { asOf: '2026-01-01' });
+    const pc = computePlannedCost(projected);
+    return { projected, derived, model: buildGanttModel(projected, derived, DEFAULT_ROW_FILTER, pc) };
+  };
+
+  it('leaf: plannedEndBaseline = frozenSlot itself; plannedStartBaseline = frozenSlot − nominalDurationDays (the D-76 display approximation)', () => {
+    const { model } = buildPlanned(plannedEvents());
+    const a = model.rows.find((r) => r.node === 'featB/a')!;
+    expect(a.frozenSlot).toBe('2026-01-10');
+    expect(a.plannedEndBaseline).toBe('2026-01-10'); // frozenSlot verbatim
+    expect(a.plannedStartBaseline).toBe(addDaysIso('2026-01-10', -a.nominalDurationDays));
+  });
+
+  it('baseline does NOT fall back to predicted: a leaf WITH a live forecast still reports its frozenSlot-based baseline (≠ its predicted-first pair)', () => {
+    const { model, derived } = buildPlanned(plannedEvents());
+    const a = model.rows.find((r) => r.node === 'featB/a')!;
+    const fc = derived.forecast.find((f) => f.node === 'featB/a')!;
+    // the live forecast genuinely diverges from the frozen baseline
+    expect(fc.predictedStart).not.toBeNull();
+    expect(a.plannedEnd).toBe('2026-01-13'); // predicted-first end (live)
+    expect(a.plannedEndBaseline).toBe('2026-01-10'); // baseline stays on frozenSlot
+    expect(a.plannedEndBaseline).not.toBe(a.plannedEnd);
+    expect(a.plannedStartBaseline).not.toBe(a.plannedStart);
+  });
+
+  it('leaf with no frozenSlot at all: both baseline fields are null — no predicted fallback (third-state stays "—")', () => {
+    const events: Event[] = [est('appSolo', [{ node: 'soloB', estimate: 2 }])];
+    const { model } = buildPlanned(events);
+    const solo = model.rows.find((r) => r.node === 'soloB')!;
+    expect(solo.frozenSlot).toBeNull();
+    expect(solo.plannedStartBaseline).toBeNull();
+    expect(solo.plannedEndBaseline).toBeNull();
+  });
+
+  it('an unagreed-but-scheduled leaf still gets a baseline (frozenSlot is present even without a live forecast)', () => {
+    const { model, derived } = buildPlanned(plannedEvents());
+    const b = model.rows.find((r) => r.node === 'featB/b')!;
+    const fc = derived.forecast.find((f) => f.node === 'featB/b')!;
+    expect(fc.predictedStart).toBeNull(); // unagreed ⇒ unschedulable ⇒ no live forecast
+    expect(b.frozenSlot).toBe('2026-01-11');
+    expect(b.plannedEndBaseline).toBe('2026-01-11');
+    expect(b.plannedStartBaseline).toBe(addDaysIso('2026-01-11', -b.nominalDurationDays));
+  });
+
+  it('parent baseline rollup: min/max over descendant baseline fields (frozenSlot-based), independent of the predicted-first rollup', () => {
+    const { model } = buildPlanned(plannedEvents());
+    const byId = new Map(model.rows.map((r) => [r.node, r]));
+    const a = byId.get('featB/a')!;
+    const b = byId.get('featB/b')!;
+    const parent = byId.get('featB')!;
+    // parent baseline = min/max of the two leaves' frozenSlot-based baselines
+    expect(parent.plannedEndBaseline).toBe(maxIso(a.plannedEndBaseline!, b.plannedEndBaseline!));
+    expect(parent.plannedStartBaseline).toBe(minIso(a.plannedStartBaseline!, b.plannedStartBaseline!));
+    expect(parent.plannedEndBaseline).toBe('2026-01-11'); // later of the two frozen slots
+    // and the baseline rollup is NOT the predicted-first rollup (feat/a's live
+    // forecast pushes the predicted-first parent end past both frozen slots).
+    expect(parent.plannedEnd).toBe('2026-01-13');
+    expect(parent.plannedEndBaseline).not.toBe(parent.plannedEnd);
   });
 });

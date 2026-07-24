@@ -22,8 +22,10 @@ import {
   depSegments,
   divergence,
   nominalDays,
+  type DateSourceMode,
   type DivTone,
   type GanttModel,
+  type GanttRow,
 } from './gantt-geometry';
 
 const ROW_H = 26;
@@ -40,6 +42,10 @@ const LABEL_W_KEY = 'moira.schedule.labelW';
 // same widths so the two rows line up.
 const COST_COL_W = 48;
 const DATE_COL_W = 42;
+// widened date column for D-81 'both' mode (baseline → predicted 2-value display).
+// same width for start/end so the two rows still line up; only used when the
+// selected dateSource is 'both'.
+const DATE_COL_W_BOTH = 78;
 
 /** Short M/D date label (matches buildAxisTicks' week-tick convention — the
  * codebase's existing compact date format; the Gantt's label pane has no room
@@ -47,6 +53,31 @@ const DATE_COL_W = 42;
 function fmtShortDate(iso: IsoDate): string {
   const d = new Date(`${iso}T00:00:00Z`);
   return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+}
+
+/** D-81 both-mode label-cell text: 'baseline → predicted' when they differ, a
+ * single value when they match, '—' on any side that is null (per D-81 body's
+ * edge cases). A fully-empty slot (both sides null) collapses to a single '—',
+ * matching the single-value modes' empty cell rather than reading '— → —'. */
+function combinedDateText(baseline: IsoDate | null, predicted: IsoDate | null): string {
+  if (baseline === null && predicted === null) return '—';
+  const bl = baseline === null ? '—' : fmtShortDate(baseline);
+  const pr = predicted === null ? '—' : fmtShortDate(predicted);
+  if (baseline !== null && predicted !== null && baseline === predicted) return bl;
+  return `${bl} → ${pr}`;
+}
+
+/** Tooltip for D-81 both-mode label cells: expands the two-value cell to full
+ * ISO dates on hover (mirrors the single-value cell tooltip convention). */
+function combinedDateTooltip(
+  side: '開始' | '終了',
+  baseline: IsoDate | null,
+  predicted: IsoDate | null,
+): string | undefined {
+  if (baseline === null && predicted === null) return undefined;
+  const bl = baseline === null ? '未凍結' : baseline;
+  const pr = predicted === null ? '未算出' : predicted;
+  return `予定${side}（基準線 ${bl} → 予測 ${pr}）`;
 }
 
 /** Planned cost (MD), same toFixed(0) convention as the other MD rollups
@@ -101,6 +132,10 @@ interface Props {
   showWeeks?: boolean; // week gridlines (issue #28) — default on
   showDays?: boolean; // day gridlines (issue #28) — default off
   showDeps?: boolean; // dependency connectors (issue #29) — default off
+  /** Label-pane 開始／終了 column date source (D-81 / issue #9). Defaults to
+   *  'predicted' (current behavior — predicted-first with frozenSlot fallback).
+   *  See DateSourceMode for the 3 options. */
+  dateSource?: DateSourceMode;
 }
 
 const divColor: Record<DivTone, string> = {
@@ -120,7 +155,57 @@ export function ScheduleGantt({
   showWeeks = true,
   showDays = false,
   showDeps = false,
+  dateSource = 'predicted',
 }: Props) {
+  const dateColW = dateSource === 'both' ? DATE_COL_W_BOTH : DATE_COL_W;
+  // Label-pane cell text for a given row's start/end column, per D-81 mode.
+  // baseline mode: shows only the frozen basis (frozenSlot minus nominal for
+  // start, frozenSlot for end); a basis-null leaf shows '—' — no predicted
+  // fallback (third-state visibility is preserved by the unchanged bar layer).
+  // both mode: shows 'baseline → predicted' when the two differ; a single value
+  // when they match; '—' on any side that is null (per D-81 body's edge cases).
+  const startText = (r: GanttRow): string => {
+    if (dateSource === 'baseline') {
+      return r.plannedStartBaseline === null ? '—' : fmtShortDate(r.plannedStartBaseline);
+    }
+    if (dateSource === 'both') return combinedDateText(r.plannedStartBaseline, r.plannedStart);
+    return r.plannedStart === null ? '—' : fmtShortDate(r.plannedStart);
+  };
+  const endText = (r: GanttRow): string => {
+    if (dateSource === 'baseline') {
+      return r.plannedEndBaseline === null ? '—' : fmtShortDate(r.plannedEndBaseline);
+    }
+    if (dateSource === 'both') return combinedDateText(r.plannedEndBaseline, r.plannedEnd);
+    return r.plannedEnd === null ? '—' : fmtShortDate(r.plannedEnd);
+  };
+  const startTooltip = (r: GanttRow): string | undefined => {
+    if (dateSource === 'baseline') {
+      return r.plannedStartBaseline === null ? undefined : `予定開始（基準線） ${r.plannedStartBaseline}`;
+    }
+    if (dateSource === 'both') return combinedDateTooltip('開始', r.plannedStartBaseline, r.plannedStart);
+    return r.plannedStart === null ? undefined : `予定開始 ${r.plannedStart}`;
+  };
+  const endTooltip = (r: GanttRow): string | undefined => {
+    if (dateSource === 'baseline') {
+      return r.plannedEndBaseline === null ? undefined : `予定終了（基準線） ${r.plannedEndBaseline}`;
+    }
+    if (dateSource === 'both') return combinedDateTooltip('終了', r.plannedEndBaseline, r.plannedEnd);
+    return r.plannedEnd === null ? undefined : `予定終了 ${r.plannedEnd}`;
+  };
+  const isSlotEmpty = (r: GanttRow, side: 'start' | 'end'): boolean => {
+    if (dateSource === 'baseline') {
+      return (side === 'start' ? r.plannedStartBaseline : r.plannedEndBaseline) === null;
+    }
+    if (dateSource === 'both') {
+      // both mode: only fully empty if BOTH baseline and predicted sides are null
+      // (otherwise the cell still shows at least one value; the '—' filler is
+      // rendered inline via combinedDateText per D-81 body's edge cases).
+      const bl = side === 'start' ? r.plannedStartBaseline : r.plannedEndBaseline;
+      const pr = side === 'start' ? r.plannedStart : r.plannedEnd;
+      return bl === null && pr === null;
+    }
+    return (side === 'start' ? r.plannedStart : r.plannedEnd) === null;
+  };
   const { rows, start, totalDays } = model;
   const trackW = totalDays * dayW;
   const xOf = (d: IsoDate) => daysBetween(start, d) * dayW;
@@ -275,13 +360,13 @@ export function ScheduleGantt({
               </div>
               <div
                 data-testid="gantt-col-head:start"
-                style={{ flex: '0 0 auto', width: DATE_COL_W, padding: '0 4px 4px', textAlign: 'right' }}
+                style={{ flex: '0 0 auto', width: dateColW, padding: '0 4px 4px', textAlign: 'right' }}
               >
                 開始
               </div>
               <div
                 data-testid="gantt-col-head:end"
-                style={{ flex: '0 0 auto', width: DATE_COL_W, padding: '0 8px 4px', textAlign: 'right' }}
+                style={{ flex: '0 0 auto', width: dateColW, padding: '0 8px 4px', textAlign: 'right' }}
               >
                 終了
               </div>
@@ -406,33 +491,33 @@ export function ScheduleGantt({
                     </span>
                     <span
                       data-testid={`gantt-col:start:${r.node}`}
-                      title={r.plannedStart === null ? undefined : `予定開始 ${r.plannedStart}`}
+                      title={startTooltip(r)}
                       className="mono"
                       style={{
                         flex: '0 0 auto',
-                        width: DATE_COL_W,
+                        width: dateColW,
                         padding: '0 4px',
                         textAlign: 'right',
                         fontSize: 10.5,
-                        color: r.plannedStart === null ? EVM.ink4 : EVM.ink2,
+                        color: isSlotEmpty(r, 'start') ? EVM.ink4 : EVM.ink2,
                       }}
                     >
-                      {r.plannedStart === null ? '—' : fmtShortDate(r.plannedStart)}
+                      {startText(r)}
                     </span>
                     <span
                       data-testid={`gantt-col:end:${r.node}`}
-                      title={r.plannedEnd === null ? undefined : `予定終了 ${r.plannedEnd}`}
+                      title={endTooltip(r)}
                       className="mono"
                       style={{
                         flex: '0 0 auto',
-                        width: DATE_COL_W,
+                        width: dateColW,
                         padding: '0 8px 0 4px',
                         textAlign: 'right',
                         fontSize: 10.5,
-                        color: r.plannedEnd === null ? EVM.ink4 : EVM.ink2,
+                        color: isSlotEmpty(r, 'end') ? EVM.ink4 : EVM.ink2,
                       }}
                     >
-                      {r.plannedEnd === null ? '—' : fmtShortDate(r.plannedEnd)}
+                      {endText(r)}
                     </span>
                   </div>
 

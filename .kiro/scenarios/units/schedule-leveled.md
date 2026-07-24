@@ -173,6 +173,66 @@ And   Y の要件定義が初めてスケジュールに載った時点で、予
 
 <small>注：frozenSlot の**凍結（記録）**と PV への**算入**は別条件。凍結は「初回スケジュール載せ」で起き、PV 算入は「frozenSlot ≤ asOf（基準完了日が今日以前）」で起きる（参照実装 `pv.ts`：`if (n.frozenSlot <= asOf) sum += n.frozenBudget`、`Inspector.tsx` の `scheduledByNow`/`taskPv`）。本ユニットの asOf=7/1・frozenSlot=7/6 では未到達ゆえ PV=0。したがって割当直後・→ready 後とも PV は 0 のままで、→ready で変わるのは「frozenSlot が null→7/6 に凍結された」ことのみ。</small>
 
+### ラベルペイン列の日付ソース切替(新規・issue #9)
+
+スケジュール画面のヘッダに**「日付ソース」トグル(3 択・新規)**が並ぶ——**予測**(既定・現行挙動)／**基準線**(凍結された基準完了日と、その近似の基準開始日だけを見せる)／**両方併記**(基準線と予測の 2 値を並記)。選択は端末側の記憶に残り、リロード後も復元される。**切替は表示層のラベルペイン列だけ**に効き、詳細パネル・バー描画・進捗フィルタ・EVM 表示・親(非葉)行のロールアップはいずれも変わらない——本モード切替の対象は schedule-time サーフェスのラベルペイン列のみで、他サーフェス(CLI 出力・レポート・マイルストーン画面・複数案件並置画面)は対象外。
+
+**本ユニット After 状態でのラベルペイン列(新規)**——本ユニットは予測完了日と基準完了日が一致するケース(乖離なし)だが、**開始日側だけは 1 日ずれる**ことに注意：予測モードの開始は「実際に手が動く最初の日」(担当者の稼働可能日を消費し始める日)、基準線モードの開始は「基準完了日から名目日数を引いた月境界越え計算」——ゆえに X(基準完了日 7/3・名目 3 日)は予測開始 7/1 に対し基準開始は「7/3 − 3 日」＝**6/30**(月境界越え)、Y(基準完了日 7/6・名目 3 日)は予測開始 7/4 に対し基準開始は **7/3**：
+
+<table style="border-collapse:collapse;font-family:system-ui,sans-serif;font-size:13px;width:100%;margin-top:10px">
+  <tr style="background:#374151;color:#fff">
+    <td style="padding:6px 10px;width:210px">📅 ラベルペイン列(新規・After 状態)</td>
+    <td style="padding:6px 10px;text-align:center;width:130px">開始(予測モード)</td>
+    <td style="padding:6px 10px;text-align:center;width:130px">開始(基準線モード)</td>
+    <td style="padding:6px 10px;text-align:center;width:120px">終了(3 モード同一)</td>
+  </tr>
+  <tr>
+    <td style="padding:6px 10px;border:1px solid #cbd5e1">X/要件定義</td>
+    <td style="padding:4px 10px;border:1px solid #cbd5e1;text-align:right;font-family:monospace">7/1</td>
+    <td style="padding:4px 10px;border:1px solid #cbd5e1;text-align:right;font-family:monospace">6/30</td>
+    <td style="padding:4px 10px;border:1px solid #cbd5e1;text-align:right;font-family:monospace">7/3</td>
+  </tr>
+  <tr>
+    <td style="padding:6px 10px;border:1px solid #cbd5e1">Y/要件定義(→ready 後)</td>
+    <td style="padding:4px 10px;border:1px solid #cbd5e1;text-align:right;font-family:monospace">7/4</td>
+    <td style="padding:4px 10px;border:1px solid #cbd5e1;text-align:right;font-family:monospace">7/3</td>
+    <td style="padding:4px 10px;border:1px solid #cbd5e1;text-align:right;font-family:monospace">7/6</td>
+  </tr>
+</table>
+
+**対照：乖離のある状態でのラベルペイン列**——モード差の実効はいっそう明らかになる。sister unit [schedule-rebaseline](./schedule-rebaseline.md) の Before 状態(同時点のスナップショット：Y の予測完了日 7/5・基準完了日 7/3・名目 3 日)で 3 モードを対照する：
+
+<table style="border-collapse:collapse;font-family:system-ui,sans-serif;font-size:13px;width:100%;margin-top:10px">
+  <tr style="background:#374151;color:#fff">
+    <td style="padding:6px 10px;width:140px">モード</td>
+    <td style="padding:6px 10px;text-align:center;width:110px">Y の開始</td>
+    <td style="padding:6px 10px;text-align:center;width:110px">Y の終了</td>
+    <td style="padding:6px 10px">意味</td>
+  </tr>
+  <tr>
+    <td style="padding:6px 10px;border:1px solid #cbd5e1">予測(既定)</td>
+    <td style="padding:4px 10px;border:1px solid #cbd5e1;text-align:right;font-family:monospace">7/3</td>
+    <td style="padding:4px 10px;border:1px solid #cbd5e1;text-align:right;font-family:monospace">7/5</td>
+    <td style="padding:6px 10px;border:1px solid #cbd5e1;font-size:11.5px">生きた予測の開始日・完了日を主として出す(基準完了日はフォールバック)</td>
+  </tr>
+  <tr>
+    <td style="padding:6px 10px;border:1px solid #cbd5e1">基準線</td>
+    <td style="padding:4px 10px;border:1px solid #cbd5e1;text-align:right;font-family:monospace">6/30</td>
+    <td style="padding:4px 10px;border:1px solid #cbd5e1;text-align:right;font-family:monospace">7/3</td>
+    <td style="padding:6px 10px;border:1px solid #cbd5e1;font-size:11.5px">基準完了日(7/3)と近似の基準開始日(7/3 − 名目 3 日 = 6/30・月境界越え)を出す</td>
+  </tr>
+  <tr>
+    <td style="padding:6px 10px;border:1px solid #cbd5e1">両方併記</td>
+    <td style="padding:4px 10px;border:1px solid #cbd5e1;text-align:right;font-family:monospace">6/30 → 7/3</td>
+    <td style="padding:4px 10px;border:1px solid #cbd5e1;text-align:right;font-family:monospace">7/3 → 7/5</td>
+    <td style="padding:6px 10px;border:1px solid #cbd5e1;font-size:11.5px">「基準線 → 予測」の 2 値並記。両者一致時は 1 値のみ、片側が空なら空側は '—' で示す</td>
+  </tr>
+</table>
+
+**親(非葉)行のロールアップ**——フィーチャー行など子孫を束ねる行の開始／終了は、モードに関わらず**子孫の最速／最遅**を集めて表示する(既存挙動を維持)。基準線モードで一部の子葉が基準未刻の場合、親の値は残りの子葉の範囲を反映し、未刻の子は行フィルタで拾える(親の値からは見えないが、行フィルタで基準未刻子を辿ることで隠さない)。
+
+<small>実装接地の注(一次資料)：モード切替 UI・端末側の記憶キー・3 モード分岐・親行のロールアップ挙動はいずれも本 issue(#9)で新規実装される。近似の算術(基準完了日 − 名目日数)は既存の [`gantt-geometry.ts`](../../moira/frontend/src/surfaces/schedule/gantt-geometry.ts) `addDaysIso(frozenSlot, -nomDays)` を再利用(月境界越えの挙動は `d.setUTCDate(d.getUTCDate() + n)` に従い、7/3 − 3 日 = 6/30 になる)。バー描画層は完了・未凍結葉(PV 不算入の可視ギャップ状態・UI-DESIGN-BRIEF §3.2 状態C)にのみ「計画に載らない」帯(斜線ハッチ)を描く既存分岐に接地し、モード切替はこの分岐を変えない。乖離のある状態の借用値は sister unit `schedule-rebaseline` の Before 状態を 2026-07-21 時点でスナップショット(sister unit が改訂された場合は本ユニットの対照表も追随する)。</small>
+
 **データ（After・素の値）**
 
 | ノード | lifecycle | estimate | 見積値 | 担当 | 予測完了日 | 凍結スロット（frozenSlot） |
@@ -225,9 +285,19 @@ And   Y の要件定義が初めてスケジュールに載った時点で、予
 - **WHEN** 作業が初めてスケジュールに載ったとき、**システムは** その時点の予測完了日を計画の基準完了日（ベースライン）として記録し、以降の予測変更で上書き**してはならない**。
 - **WHILE** 担当者が割り当てられていない作業がある間、**システムは** その作業をスケジュールに載せず、「未割当」として別に表示**しなければならない**。
 - **WHEN** 担当者が割り当てられていない作業について、**システムは** 計画の基準完了日を捏造**してはならない**（未凍結のまま正直に表示する）。
+- **WHEN** スケジュール画面が表示されるとき、**システムは** ヘッダに「日付ソース」の 3 択トグル(予測／基準線／両方併記)を提供**しなければならない**(利用者が主として見る日付を選べる)。
+- **WHEN** 開発者が日付ソースを**基準線**に切り替えたとき、**システムは** ラベルペインの「開始」列に基準完了日から名目日数を引いた近似の基準開始日を、「終了」列に基準完了日を表示し、生きた予測を当該列に出**してはならない**。
+- **WHEN** 開発者が日付ソースを**予測**に切り替えたとき、**システムは** ラベルペインの「開始」列に生きた予測の開始日(基準完了日−名目日数の近似はフォールバック)を、「終了」列に生きた予測の完了日(基準完了日はフォールバック)を表示**しなければならない**。
+- **WHEN** 開発者が日付ソースを**両方併記**に切り替えたとき、**システムは** 各セルに「基準線 → 予測」の 2 値を並記**しなければならない**(両者が同一日付なら 1 値のみ、片側が空なら空側は '—' で示す)。
+- **WHEN** スケジュール画面を初回に開くとき、**システムは** 日付ソースの既定として「予測」を選択**しなければならない**(現行挙動を維持する)。
+- **WHEN** 開発者が日付ソースを切り替えた後にページをリロードしたとき、**システムは** 直前の選択を端末側の記憶から復元**しなければならない**(記憶が使えない環境では既定「予測」にフォールバックする)。
+- **WHILE** どの日付ソース(予測／基準線／両方併記)が選択されている間も、**システムは** 詳細パネル(基準完了日・予測完了日の 2 値並置)・ガントバーの色分けと稲妻線・進捗フィルタの判定基準・EVM 表示・親(非葉)行の子孫最速／最遅ロールアップを変更**してはならない**(モード切替は表示層のラベルペイン列だけに効く)。
+- **WHEN** 基準線モードで基準完了日が未刻の葉を表示するとき、**システムは**「開始」「終了」列とも '—' を表示し、生きた予測を代役に埋め**てはならない**(バー領域は既存挙動のまま——完了・未凍結葉は「計画に載らない」帯を継続、他の未凍結葉は行フィルタで拾えるようにする)。
+- **WHILE** 基準線モードが選択されている間、**システムは** 進捗フィルタ(「遅延中」／「順調」)の判定基準を変えて**はならない**——判定は引き続き生きた予測と基準完了日の乖離で行い、ラベルペイン列に表示される値と絞り込みの判定基準が別を指すことを利用者に委ねる。
 
 ## 7. 決定事項
 
-<!-- 検証ループ前のドラフト。対話で確定した決定のみここに記す。 -->
+<!-- 検証ループで確定した決定のみここに記す。 -->
 
 - **frozenSlot を本シナリオに含める（ユーザー判断）:** 「スケジュールの可視性と衝突検知」に加えて、「初回スケジュール載り時に予定完了日が凍結される」ことを同一シナリオで扱う（別ユニットに切り出さない）。
+- **日付ソース切替(3 モード)の断面を本ユニットに含める(2026-07-21):** 独立ユニットを新設せず、schedule-time ラベルペイン「開始／終了」列の 3 モード切替(予測／基準線／両方併記)のふるまいを本ユニットの §4 追加サブセクション・§6 追加 EARS として扱う。既存の §1〜§3 は不変。乖離状態の対照は sister unit [schedule-rebaseline](./schedule-rebaseline.md) の Before 状態を借用する。
