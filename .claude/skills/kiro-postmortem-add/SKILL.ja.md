@@ -1,6 +1,6 @@
 ---
 name: kiro-postmortem-add
-description: Append a defect entry to .kiro/postmortem/defects.md with 10 mandatory fields (発生機能 / 発生した不具合 / 検知した工程 / 検知すべき工程 / 検知できなかった理由 / 要因分類 / 根本要因分類 / 根本要因詳細 / 同件調査 / 次回からの対応策). Use when a defect is identified and its root cause is clarified, either proactively by the AI or on user demand.
+description: Append a defect entry to .kiro/postmortem/defects.md with 17 mandatory fields (対象システム / 事象 / 障害判定 / 変更分類 / 変更範囲 / 発生原因サマリ / 発生原因詳細 / 根本要因 / 同件調査対象 / 同件調査結果 / 同件の対応状況 / 再発防止策 / 検知すべき工程 / 実際に検知した工程 / 検知できなかった理由 / 検知するための対策), each carrying a provenance label. Use when a change has been judged a defect and its root cause is clarified — either proactively by the AI, on user demand, or delegated from the change-analysis intake (moira-change-analysis A0).
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash
 argument-hint: <one-line defect summary, optional>
 metadata:
@@ -11,130 +11,153 @@ metadata:
 
 ## 役割
 
-不具合 1 件分を `.kiro/postmortem/defects.md` ledger に **10 項目埋めた構造化エントリ** として追記する skill。Plan-Do フェーズを担当。AI が不具合発生時に能動的に提案、またはユーザーが任意で起動。
+**障害**（不具合）1 件分を `.kiro/postmortem/defects.md` ledger に **17 項目埋めた構造化エントリ**として
+追記する skill。Plan-Do フェーズを担当。AI が能動的に提案、ユーザーが任意で起動、または
+要因分析フローの受付（`moira-change-analysis` A0）から**障害と判定された件が委譲**されてくる。
+
+**非障害**は本 skill の対象外——`.kiro/analysis/` 側に記録される（振り分けは A0 が行う）。
+規範は [`.kiro/steering/moira-change-analysis.md`](../../../.kiro/steering/moira-change-analysis.md)。
 
 ## コアミッション
 
-**ミッション**: 不具合 1 件を漏れなく構造化記録し、後段の `/kiro-postmortem-review` が集約分析できる入力として ledger に蓄積する。
+**ミッション**: 障害 1 件を漏れなく構造化記録し、後段の `/kiro-postmortem-review` が
+（`.kiro/analysis/` の非障害 entry と**あわせて**）集約分析できる入力として ledger に蓄積する。
 
 **成功基準**:
-- 全 10 項目が確実に埋まった entry が ledger 末尾に append される
+
+- 全 17 項目が**出所ラベル付き**で埋まった entry が ledger 末尾に append される
+  （**根拠を示せない欄は `unknown` と記録する**——空欄・推測での穴埋めは禁止）
 - 既存 ledger 内容が byte-for-byte 保持される (append-only)
-- タクソノミー外ラベル入力時は同一操作の中で taxonomy reference + ledger ヘッダを同時拡張
-- 完了後、R9.5 のトリガー条件を判定し、該当時は `/kiro-postmortem-review` 起動を 1 行で提案
+- タクソノミー外ラベル入力時は同一操作の中で**正本**（`rules/taxonomy-reference.md`）＋ ledger ヘッダ要約を更新
+- 完了後、`rules/trigger-detection.md` のトリガー条件を判定し、該当時は `/kiro-postmortem-review` 起動を 1 行で提案
 
 ## 実行ステップ
 
 ### Step 1: コンテキスト収集
 
-- `.kiro/postmortem/defects.md` を Read (既存 ledger があれば)
-  - 存在しない場合は Step 2 で初期化
-- `.claude/skills/kiro-postmortem-add/rules/taxonomy-reference.md` を Read (4 タクソノミー定義)
-- `.claude/skills/kiro-postmortem-add/rules/trigger-detection.md` を Read (review トリガー判定ロジック)
-- 会話文脈と直近の `git diff --stat` / `git diff --name-only` から変更ファイルパスを把握
+- `.kiro/postmortem/defects.md` を Read (既存 ledger があれば。無ければ Step 2 で初期化)
+- `.claude/skills/kiro-postmortem-add/rules/taxonomy-reference.md` を Read（**タクソノミー定義の正本**・5 軸）
+- `.claude/skills/kiro-postmortem-add/rules/trigger-detection.md` を Read（review トリガー判定ロジック）
+- `.kiro/steering/moira-change-analysis.md` を Read（項目定義・出所ラベル・判定基準の規範）
+- 委譲元（`moira-change-analysis` A0）から証跡束を渡されていればそれを使う。無ければ会話文脈と
+  `git diff --stat` / `git diff --name-only` から変更ファイルパスを把握する
 
 ### Step 2: 初期 Ledger 作成 (ledger 不在時のみ)
 
-- `.claude/skills/kiro-postmortem-add/templates/ledger-header.md` を Read してテンプレ展開
-- `.claude/skills/kiro-postmortem-add/templates/seed-entries.md` を Read して 3 件 seed body を取得
-- 両者を結合して `.kiro/postmortem/defects.md` を Write 新規作成
-  - 構造: `# 不具合要因分析 Ledger` (header テンプレ展開) → `## Entries` (seed 3 件) → `## Steering 反映ログ` (空)
-- この時点で seed #0001-#0003 がすべて `Status: recorded` で含まれる
+- `.claude/skills/kiro-postmortem-add/templates/ledger-header.md` を Read してテンプレ展開し、
+  その `## Entries` 節以降（雛形）を含めてそのまま `.kiro/postmortem/defects.md` として Write 新規作成
+- **初期 seed の自動投入は行わない**（2026-07-25 改訂・issue #19）——空の `## Entries` 節で作る。
+  破棄済みデータを復活させない・Entry ID を衝突させないため
+- テンプレ内の相対リンクは **ledger の位置（`.kiro/postmortem/`）基準**で書かれている（そのまま展開してよい）
 
-### Step 3: 10 フィールドのドラフト作成
+### Step 3: 17 フィールドのドラフト作成
 
-会話文脈・git diff・変更ファイルパスから 10 項目のドラフト値を推論する:
+証跡束・会話文脈・git diff・変更ファイルパスから 17 項目のドラフト値を推論する。
+**各項目に出所ラベルを付ける**——`derived`（履歴から写した・出典必須）／`inferred`（AI 推論・根拠必須）／
+`captured`（変更管理フロー実行時の一次記録）／`unknown`（埋められない）。
 
 | Field | 推論方法 |
 |---|---|
-| 発生機能 | 変更ファイルパスを発生機能タクソノミーと照合 (例: `evm-studio/client/src/lib/formatters.ts` → `dashboard / formatters`) |
-| 発生した不具合 | 直近の不具合報告会話を要約 |
-| 検知した工程 | 「誰がいつ気付いたか」を会話文脈から: ユーザー報告 → `user-report`、テスト実行で → `unit-test` / `integration-test` / `e2e` |
-| 検知すべき工程 | V モデルに従い、要因分類が `impl-error` なら `unit-test`、`design-error` なら `integration-test`、`requirements-error` なら `e2e`、を初期提案 |
-| 検知できなかった理由 | 検知工程の差分から推論 (例: 該当テストが存在しなかった、レビュー観点が不足、etc) |
-| 要因分類 | 不具合の出所成果物 (要件 / 設計 / コード / 環境 / 状態 / ツール / 外部) から推論 |
-| 根本要因分類 | 失敗メカニズム (Why 軸) を推論。(What × Why) Quick Reference Map を参照 |
-| 根本要因詳細 | 「なぜそのメカニズムが発動したか」の具体的文章を生成。**撤回条件タグの規律**: 根本要因が「敵対ゲートで追跡付き deferred にした Important の実害化」なら literal タグ `[deferred-important]` を、「R/D/T 使い捨て方針下での維持 spec 不在／再生成物の不忠実」なら literal タグ `[rdt-disposal]` を、「変更管理フローで事前批准した意図と agreed 文面の乖離の実害化」なら literal タグ `[intent-drift]` を本文に含める（各ゲート/steering の撤回条件トリガが grep で数えるため。該当しなければ付けない） |
-| 同件調査 | 既存 ledger entries を grep し、同じ根本要因 or 要因分類のラベルを持つ過去 entry の ID を列挙 |
-| 次回からの対応策 | Try 候補となる対策を 1-3 項目で起こす |
+| 1. 対象システム | 変更ファイルパス → `backend`（`moira/backend/`）／`frontend`（`moira/frontend/src/...`）／`cli`（`moira/cli/`）／`adapter`／`process`（`.claude/skills/`・`.kiro/steering/`・確定文書） |
+| 2. 事象 | Given/When/Then ＋ 期待値・実際値。症状の報告・witness テストの落ち方から起こす |
+| 3. 障害判定 | 本 ledger は `障害` のみ（A0 の判定を転記し、根拠を添える） |
+| 4. 変更分類 | 是正なら `bugfix`。仕組み側の是正なら `process-improve` 等 |
+| 5. 変更範囲 | 影響マップ（`moira/changes/issue-N/impact-map.md`）のクラス列 M/D/P/S/C/V/F |
+| 6. 発生原因サマリ | **専門用語なし**の平易文 1〜2 文 |
+| 7. 発生原因詳細 | 技術者向け。出典パス（コード・台帳）を伴う |
+| 8. 根本要因 | **仕組み帰責を必ず一度は問う**（SKILL / steering / テンプレート / 工程配線 / タクソノミー / 人間タッチポイント設計に穴がなかったか）＋根本要因分類・要因分類ラベル。**撤回条件タグの規律**: 「敵対ゲートで追跡付き deferred にした Important の実害化」なら `[deferred-important]`、「R/D/T 使い捨て方針下での維持 spec 不在／再生成物の不忠実」なら `[rdt-disposal]`、「変更管理フローで事前批准した意図と agreed 文面の乖離の実害化」なら `[intent-drift]` を本文に含める（各 steering の撤回条件トリガが grep で数えるため。該当しなければ付けない） |
+| 9. 同件調査対象 | 走査した母集団を明示（既存 entry・`.kiro/analysis/entries/`・open issues）。**範囲を書かない「該当なし」は不可** |
+| 10. 同件調査結果 | **両台帳**を意味検索し、同じ根本要因／要因分類を持つ過去 entry の ID・キーを列挙 |
+| 11. 同件の対応状況 | 別 issue のキー＋リンク＋state（`gh issue view <N> --json state`） |
+| 12. 再発防止策 | Try 候補（**出口を名指す**: steering / skill / テンプレート / 計器） |
+| 13. 検知すべき工程 | V モデル軸（`impl-error` → `unit-test` 等）またはプロセス軸（波及漏れ → `p2-impact-survey` 等） |
+| 14. 実際に検知した工程 | `moira/changes/issue-N/gate-round-records.md` の指摘ラウンドが一次証跡。無ければ会話文脈から |
+| 15. 検知できなかった理由 | 13 ≠ 14 の差分から。13 = 14 なら「該当なし（同工程で検知）」 |
+| 16. 検知するための対策 | 計器・ゲート・チェックリストのどれを足すか名指す |
 
 ### Step 4: ユーザー確認ループ
 
-- 各フィールドのドラフト値をユーザーに提示
+- 各フィールドのドラフト値と**出所ラベル**をユーザーに提示
 - ユーザーが確認 / 修正 / 拒否を選べる対話
 - タクソノミー外ラベルを入力した場合:
   - 既存タクソノミーから類似候補を 3 つ提示
-  - ユーザーが既存選択 or「同一操作の中で taxonomy 拡張」を選ぶ
-  - 拡張を選んだ場合: 本 skill が ledger ヘッダの該当タクソノミー定義表 + `rules/taxonomy-reference.md` の同セクションに新ラベル行を Edit で追加 (新ラベル名 + 定義 + 該当例)
-  - ユーザーに「`.kiro/specs/defect-pdca/requirements.md` の該当 Requirement の AC.1 も後で更新してください」と通知 (3 ファイル同期の最後 1 ファイルは spec 文書側なので skill では触らない)
+  - ユーザーが既存選択 or「同一操作の中でタクソノミー拡張」を選ぶ
+  - 拡張を選んだ場合: **正本**（`rules/taxonomy-reference.md`）の該当節に新ラベル行を Edit で追加し、
+    `.kiro/postmortem/defects.md` ヘッダの**要約**を必要に応じて追随させる
+    （**2 ファイル**。2026-07-25 改訂・issue #19: 旧「3 ファイル同期」の 3 つ目
+    `.kiro/specs/defect-pdca/requirements.md` は**対象ファイルが存在しない**ため削除した）
 
 ### Step 5: 検証と Append
 
-- 必須 10 項目すべて非空であることを検証
-- 1 つでも空なら append を拒否し、欠落フィールドを明示してユーザーに戻す (Step 4 ループに戻る)
+- **必須 17 項目すべてが非空**であることを検証する。**`unknown` は有効な記入**（埋められないことの記録）であり、
+  空欄は不可——1 つでも空なら append を拒否し、欠落フィールドを明示して Step 4 へ戻す
+- 各項目に**出所ラベルが付いている**ことを検証する（欠けていれば同じく差し戻し）
 - 検証通過したら:
-  - 既存 ledger から最大 Entry ID を抽出 (例: `0003`) → 次 ID を算出 (`0004`)
-  - `templates/entry-template.md` をテンプレ展開 (10 フィールド + メタを埋める)
-  - `Status: recorded`, `Source: organic` を設定
-  - `Created:` に現在の ISO 8601 UTC タイムスタンプを設定
-  - `.kiro/postmortem/defects.md` の `## Entries` セクション末尾に Write append (`Edit` ツールで末尾位置を特定し、既存内容を保持)
-- Append 前に ledger ファイルの mtime を Read で再確認し、Step 1 の Read から変化していたら concurrent write 疑いとしてユーザーに通知 (R10.2)
+  - 既存 ledger から最大 Entry ID を抽出 → 次 ID を算出
+  - `templates/entry-template.md` をテンプレ展開（17 フィールド ＋ メタ: `Key`・`Schema: v2`・`Verdict: 障害`）
+  - `Status: recorded`、`Source:` は `organic`（通常追記）または `analysis-intake`（A0 からの委譲）
+  - `Created:` に現在の ISO 8601 UTC タイムスタンプ
+  - `.kiro/postmortem/defects.md` の `## Entries` セクション末尾に Edit で append（既存内容を保持）
+  - **非障害の entry をここに書かない**（`.kiro/analysis/` 側の責務）
+- Append 直前に ledger の mtime を Read で再確認し、Step 1 から変化していたら concurrent write 疑いとして通知
 
 ### Step 6: Append 後のトリガー判定
 
-`rules/trigger-detection.md` のロジックに従い、`/kiro-postmortem-review` 起動を提案すべきかを判定:
+`rules/trigger-detection.md` のロジックに従う:
 
-1. 直近の会話文脈で `/kiro-impl <feature>` が直前に完了した? → trigger (a) `spec-completion`
-2. ledger を再 Read して `recorded` status のエントリで同じ `根本要因分類` または `要因分類` が 2 件以上ある? → trigger (b) `cluster-threshold`
-3. 次に `/kiro-spec-init` 起動が予告されている? → trigger (c) `new-spec-init`
+1. 未分析キューが 10 件以上? → `queue-threshold`
+2. `recorded` status の entry で同じ `根本要因分類` または `要因分類` が 2 件以上? → `cluster-threshold`
+3. 前回の横断集約から 1 か月経過? → `periodic`
 
 該当時は 1 行で提案:
 
 ```
-/kiro-postmortem-review を起動しますか？ 未レビュー X 件・該当トリガー: {triggers}
+/kiro-postmortem-review を起動しますか？ 未分析 X 件・該当トリガー: {triggers}
 ```
 
-未該当 or `(d) user-explicit` のみは提案不要。
+未該当 or `user-explicit` のみは提案不要。**AI はユーザー確認なしに起動しない。**
 
 ### Step 7: 出力
 
-ユーザーに以下を報告:
-- `appended` / `cancelled` / `error` の status
-- Entry ID
-- ledger path (`.kiro/postmortem/defects.md`)
-- (該当時) review トリガー提案
+`appended` / `cancelled` / `error` の status ／ Entry ID ／ ledger path ／
+**出所ラベルの内訳（`unknown` の欄は全列挙）** ／ (該当時) review トリガー提案。
 
-## 重要な制約
+## クリティカル制約
 
-- **Append-only**: 既存 ledger 内容を byte-for-byte 保持 (R1.3, R5.4)
-- **All-or-nothing**: 必須 10 項目すべて埋まるまで append しない (R2.5, R5.5)
-- **Partial-write 禁止**: ユーザーが mid-flow で却下したら何も書き込まない (R5.5)
-- **Steering へ直接書き込み禁止**: 本 skill は `.kiro/steering/` を一切変更しない (steering 書き込みは `/kiro-postmortem-review` 経由 + `/kiro-steering-custom`)
-- **既存 spec / skill / settings.json 不変**: `.kiro/specs/{core-data-model,evm-engine,progress-tracking,dashboard}/` と `.claude/skills/kiro-*/` (本 skill 自身以外) と `.claude/settings.json` を変更しない (R11)
-- **UTF-8 保持**: 日本語テキストを正規化せずに保持 (R10.4)
-- **FS エラー時の write 中止**: ledger が読めない場合 write しない (R10.5)
-- **In-progress draft 復帰**: 前回中断ドラフトの取扱いをユーザーに確認 (R5.6)
+- **Append-only**: 既存 ledger 内容を byte-for-byte 保持
+- **All-or-nothing**: 必須 17 項目すべてが非空になるまで append しない（`unknown` は非空として扱う）
+- **捏造禁止**: 根拠を示せない欄は `unknown`。**空欄を埋めるための推測を書かない**
+- **遡及書き換え禁止**: 既存 entry（`Schema: v1` = 旧 10 項目）を新様式へ書き換えない
+- **Partial-write 禁止**: ユーザーが mid-flow で却下したら何も書き込まない
+- **Steering へ直接書き込み禁止**: 本 skill は `.kiro/steering/` を一切変更しない
+- **他 skill / settings.json 不変**: `.claude/skills/kiro-*/`（本 skill 自身以外）と `.claude/settings.json` を変更しない
+- **非障害を書かない**: 障害以外は `.kiro/analysis/` 側（`moira-change-analysis`）の責務
+- **UTF-8 保持** ／ **FS エラー時の write 中止** ／ **中断ドラフトの復帰確認**
 
-## 出力の説明
+## 出力仕様
 
 ```
 Status: appended | cancelled | error
-Entry ID: 0004
+Entry ID: 0002
+Key: moira#16
 Ledger: .kiro/postmortem/defects.md
+Provenance: derived 6 / inferred 9 / captured 1 / unknown 0
+Unknown fields: (なし)
 (以下、該当時のみ)
-Review Trigger Proposal: /kiro-postmortem-review を起動しますか？ 未レビュー 3 件・該当トリガー: cluster-threshold (assumption-error が 2 件)
+Review Trigger Proposal: /kiro-postmortem-review を起動しますか？ 未分析 11 件・該当トリガー: queue-threshold
 ```
 
-## 安全性とフォールバック
+## 安全・フォールバック
 
-- **Concurrent write 検知**: `Step 5` の append 直前に ledger mtime を再 Read で確認、Step 1 から変化していればユーザーに resolve を求める
-- **FS エラー**: `.kiro/postmortem/defects.md` が読めない (権限 / 不存在以外で読み取り不可) 場合、エラー表面化して write 中止
-- **Malformed ledger 検知**: ヘッダ構造 (`## Entries` セクション) が見つからない場合、append 位置を特定できないため write 中止して報告
-- **Hand-edit 後の整合性**: ユーザーが手動で ledger を編集していて Entry ID が単調増加でない場合、最大 ID + 1 を採用 (ID の決定論性は維持)
-- **タクソノミー外ラベルでのキャンセル**: ユーザーが既存ラベル選択も拡張も拒否したら、append しないで cancelled で終了
+- **並行書き込み検知**: append 直前に mtime 再確認、変化していれば resolve を求める
+- **FS エラー**: ledger が読み取り不可なら write 中止
+- **Malformed ledger 検知**: `## Entries` 節が無ければ append 位置を特定できないため write 中止して報告
+- **手編集後の整合性**: Entry ID が単調増加でない場合、最大 ID + 1 を採用
+- **タクソノミー外ラベルでのキャンセル**: 既存選択も拡張も拒否したら append せず cancelled
 
-## 注記
+## 補足
 
-- 本 skill は対話的に動作し、自動化は意図しない (ユーザー確認なしで append しない)
-- `rules/taxonomy-reference.md` と本 skill の振る舞いは厳密にカップリングしている。タクソノミー変更時は taxonomy-reference.md / ledger ヘッダ / requirements.md の 3 ファイルを同時更新する
-- 初期 seed 3 件は今回の dogfooding 由来。組織的運用が始まれば `source: organic` のエントリが大半を占めるべき
+- 本 skill は対話的に動作し、自動化は意図しない（ユーザー確認なしで append しない）
+- `rules/taxonomy-reference.md` が**タクソノミーの正本**。ledger ヘッダの節は要約であり、
+  食い違えば正本が勝つ（2026-07-25・issue #19）
+- 本 skill 自身に起因する不具合は `process / kiro-postmortem-add` サブスコープで記録される（dogfooding）

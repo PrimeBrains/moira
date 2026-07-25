@@ -161,4 +161,8 @@
 - **設計判断（Decisions）を新規・改訂し批准する → `doc-refine`（`moira/DECISIONS-CATALOG.md` を確定ゲートで磨く）。MODEL の制約・語彙・既定に触れる判断は `moira-model-update` で正典へ昇格。**
 - 確定文書（steering・エージェント定義等）を磨く → `doc-refine`。
 - **`agreed` シナリオ unit から E2E シナリオ回帰（計器③）を生成・更新する → `kiro-scenario-e2e`**（fixture は §2/§5 忠実転記＋derive-golden、全 EARS 節を green/xfail/deferred で計上、`e2e-scenario-checker`〔著者≠照合者〕＋`doc-adversary`＋`doc-gate-judge` で確定、`moira/frontend/e2e/coverage-check.test.ts` が被覆を毎 CI ゲート）。
+- **変更を通し終えた後の振り返り（要因分析）→ [moira-change-analysis.md](moira-change-analysis.md)＋skill `moira-change-analysis`。
+  ただしこれは計器ではない**——事後分析であり、計器①〜⑥のいずれにも加わらず、合否を出さず、変更を止めない
+  （2026-07-25・issue #19）。本表のゲート群と混同しないこと。なお各ゲートの**ラウンド内で決着した指摘**は
+  要因分析の母集団に**入らない**（「検知すべき工程 ≠ 実際に検知した工程」のすり抜けギャップのみが入口・D-84）。
 - 関連: [moira-model.md](moira-model.md) ／ [moira-naming.md](moira-naming.md) ／ [testing-conventions.md](testing-conventions.md) ／ `moira/MODEL.md` ／ `moira/PROPERTIES.md` ／ `moira/DECISIONS-CATALOG.md`（人間レビュー目録） ／ `moira/DECISIONS.md`（意思決定ジャーナル＝来歴） ／ `.kiro/scenarios/README.md`。

@@ -13,6 +13,10 @@ Kiro-style Spec-Driven Development on an agentic SDLC
 - **変更管理フロー**（issue 受付 → 影響調査 → ルーティング → 既存ゲート起動 → 同期閉包確認 → クローズ）は
   [`.kiro/steering/moira-change-management.md`](.kiro/steering/moira-change-management.md)（規範）と
   skill `moira-change`（振り付け）が所有する。
+- **要因分析フロー**（クローズ済み変更の振り返り: 受付で障害／非障害を振り分け → 17 項目の分析票 →
+  横断集約 → 仕組み側の是正 Try）は [`.kiro/steering/moira-change-analysis.md`](.kiro/steering/moira-change-analysis.md)（規範）と
+  skill `moira-change-analysis`（振り付け）が所有する。台帳は障害＝`.kiro/postmortem/defects.md`・
+  非障害＝`.kiro/analysis/`。**検証器（計器）ではなく事後分析であり、変更を止めない。**
 - `.kiro/specs/` の requirements/design/tasks（R/D/T）は**使い捨て**の再生成物であり正典を持たない
   （sdd-workshop#40 裁定。詳細は [`.kiro/steering/moira-verification.md`](.kiro/steering/moira-verification.md)
   「R/D/T は使い捨ての再生成物」節）。旧 spec アーカイブ（`moira-*`）は移管対象外とし、旧リポ

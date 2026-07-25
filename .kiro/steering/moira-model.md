@@ -47,3 +47,5 @@
 
 - モデルの制約・語彙・既定を変える → `moira-model-update` スキル（独立敵対ゲートで `moira/MODEL.md` を確定）。
 - 確定文書（steering・エージェント定義等）を磨く → `doc-refine` スキル。
+- 変更をゲート群に通し終えた**後**の振り返り（要因分析）→ `moira-change-analysis` スキル
+  （規範は [moira-change-analysis.md](moira-change-analysis.md)）。**ゲートではない**——合否を出さず、変更を止めない。

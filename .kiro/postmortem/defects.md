@@ -1,10 +1,18 @@
 # 不具合要因分析 Ledger
 
-> AI 駆動の開発作業で発生した不具合 1 件ごとに 10 項目を記録する **追記型 Markdown ledger**。
+> AI 駆動の開発作業で発生した**障害**（不具合）1 件ごとに 17 項目を記録する **追記型 Markdown ledger**。
 > `/kiro-postmortem-add` で append、`/kiro-postmortem-review` で集約分析。
 > 抽出された Try は `/kiro-steering-custom` 経由で `.kiro/steering/*.md` に反映する PDCA 基盤。
 >
-> 仕様の正典: `/kiro-postmortem-add` / `/kiro-postmortem-review` スキル（`.claude/skills/kiro-postmortem-*`）。
+> **非障害**（要件追加・リファクタリング・仕組み改善など）の要因分析は
+> [`.kiro/analysis/`](../analysis/README.md) 側に記録される。振り分けは要因分析フローの受付（A0）が行い、
+> **判定と根拠は各 entry の項目 3 に必ず残る**。
+>
+> **規範の正典**: [`.kiro/steering/moira-change-analysis.md`](../steering/moira-change-analysis.md)（工程・項目定義・
+> 判定基準・トリガ）／**skill**: `/kiro-postmortem-add`・`/kiro-postmortem-review`（振り付け）。
+> **タクソノミー定義の正本**: [`.claude/skills/kiro-postmortem-add/rules/taxonomy-reference.md`](../../.claude/skills/kiro-postmortem-add/rules/taxonomy-reference.md)
+> ——**本ヘッダのタクソノミー節は要約であり、定義の正本ではない**（食い違えば正本が勝つ）。
+
 > ※ 本 ledger は Moira への切り替えに伴いリセット済み（旧プロトタイプ由来の entry は破棄）。Moira の不具合から再蓄積する。
 
 ---
@@ -15,48 +23,64 @@
 
 | Phase | Skill / 操作 | 起動者 | タイミング |
 |---|---|---|---|
-| **Plan** | `/kiro-postmortem-add` 起動 | AI (能動提案) または ユーザー | 不具合発覚直後 (root cause が明確になった時点) |
-| **Do** | 10 項目を対話補完して ledger に append | ユーザー (AI ドラフト提案) | Plan に続けて即時 |
-| **Check** | `/kiro-postmortem-review` 起動 | ユーザー (主体)、AI は提案者 | 後述の 4 トリガー条件のいずれか |
+| **Plan** | `/kiro-postmortem-add` 起動 | AI (能動提案) または ユーザー／要因分析フローの受付から委譲 | 障害と判定された時点 |
+| **Do** | 17 項目を対話補完して ledger に append | ユーザー (AI ドラフト提案) | Plan に続けて即時 |
+| **Check** | `/kiro-postmortem-review` 起動 | ユーザー (主体)、AI は提案者 | 後述のトリガー条件のいずれか |
 | **Act** | 抽出された Try を `/kiro-steering-custom` で steering 化 | ユーザー (AI 補助) | Check の結果として |
 
-### Check の起動トリガー (R9.5)
+### Check の起動トリガー
 
-`/kiro-postmortem-review` は以下のいずれかで起動を推奨する:
+`.claude/skills/kiro-postmortem-add/rules/trigger-detection.md` が正。要約:
 
 | ID | Trigger | 検出契機 |
 |---|---|---|
-| (a) | `spec-completion` | `/kiro-impl <feature>` 完了直後 (tasks がすべて `[x]`) |
-| (b) | `cluster-threshold` | 未レビューエントリ内で同じ `根本要因分類` または `要因分類` が 2 件以上に達した |
-| (c) | `new-spec-init` | `/kiro-spec-init <新 spec>` で新規 spec を開始する直前 (過去 Try を steering 反映してから新規 spec の要件作成に入るため) |
-| (d) | `user-explicit` | ユーザーが明示的に振り返りを要求した (他条件の有無に関わらず常時許容) |
+| (a) | `queue-threshold` | 未分析キューが 10 件以上（キューは保存せず算出） |
+| (b) | `cluster-threshold` | 未レビュー entry で同じ `根本要因分類` または `要因分類` が 2 件以上 |
+| (c) | `periodic` | 前回の横断集約から 1 か月経過 |
+| (d) | `escaped-defect` | すり抜けギャップのある欠陥の検出——**キューに積むだけ**（起動提案はしない） |
+| (e) | `user-explicit` | ユーザーが明示的に振り返りを要求（常時許容） |
 
-AI は (a) / (b) / (c) を検出時に 1 行で提案する。`(d)` は AI 提案不要。AI は **ユーザー確認なしで `/kiro-postmortem-review` を起動しない**。
+AI は (a) / (b) / (c) を検出時に 1 行で提案する。**AI は ユーザー確認なしで `/kiro-postmortem-review` を起動しない。**
 
 ---
 
-## Entry スキーマ (10 項目)
+## Entry スキーマ
 
-各エントリは以下 10 項目をすべて埋める。空項目があれば `/kiro-postmortem-add` は append を拒否する。
+**現行は `Schema: v2`（17 項目）。** 各項目には**出所ラベル**（`derived` / `inferred` / `captured` / `unknown`）を
+必ず付ける。**根拠を示せない欄は `unknown` と記録し、空欄・推測での穴埋めを禁じる。**
 
 | # | 項目 | 形式 |
 |---|---|---|
-| 1 | 発生機能 | 発生機能タクソノミーから 1 ラベル + 任意のサブスコープ (例: `moira-core / event-log`) |
-| 2 | 発生した不具合 | 具体的な記述 (1-3 段落) |
-| 3 | 検知した工程 | 検知工程タクソノミーから 1 ラベル |
-| 4 | 検知すべき工程 | 検知工程タクソノミーから 1 ラベル |
-| 5 | 検知すべき工程で検知できなかった理由 | 非空 (項目 3 と 4 が等しい場合は "該当なし (同工程で検知)" 可) |
-| 6 | 要因分類 | 要因分類タクソノミーから 1 ラベル |
-| 7 | 根本要因分類 | 根本要因分類タクソノミーから 1 ラベル |
-| 8 | 根本要因詳細 | 「なぜそのメカニズムが発動したか」の具体的記述 |
-| 9 | 同件調査 | 過去エントリ ID を `#0003, #0007` 形式で列挙、または "該当なし" |
-| 10 | 次回からの対応策 | Try 候補 (steering 化される元ネタ) |
+| 1 | 対象システム | `backend` / `frontend` / `cli` / `adapter` / `process`（複数可）＋任意サブスコープ |
+| 2 | 事象 | Given / When / Then ＋ 期待値・実際値 |
+| 3 | 障害判定 | `障害`（本 ledger は障害のみ）＋根拠 |
+| 4 | 変更分類 | 変更分類タクソノミーから 1 ラベル |
+| 5 | 変更範囲 | M/D/P/S/C/V/F（影響マップのクラス列） |
+| 6 | 発生原因サマリ | 専門用語なしの平易文 1〜2 文 |
+| 7 | 発生原因詳細 | 技術者向け・出典パス付き |
+| 8 | 根本要因 | **仕組み帰責を必ず一度は問う**＋根本要因分類・要因分類ラベル＋詳細 |
+| 9 | 同件調査対象 | 走査した母集団の明示（範囲を書かない「該当なし」は不可） |
+| 10 | 同件調査結果 | 有無＋該当 ID／キー |
+| 11 | 同件の対応状況 | 別 issue のキー＋リンク＋state |
+| 12 | 再発防止策 | Try 候補（出口を名指す） |
+| 13 | 検知すべき工程 | 検知工程タクソノミーから 1 ラベル |
+| 14 | 実際に検知した工程 | 同上 |
+| 15 | なぜ然るべき工程で検知できなかったか | 13 ≠ 14 なら非空 |
+| 16 | 検知するための対策 | 計器・ゲート・チェックリストのどれを足すか名指す |
 
 各エントリは以下のメタデータも保持する:
-- `Status:` (recorded / reviewed / steered)
+
+- `Status:` (`recorded` / `reviewed` / `steered`)
 - `Entry ID:` (zero-padded 4-digit int, e.g. `0001`)
+- `Key:` (repo 修飾の変更キー e.g. `moira#16`。無修飾の `#N` を書かない)
+- `Schema:` (`v1` = 旧 10 項目／`v2` = 現行 17 項目)
 - `Created:` (ISO 8601 timestamp)
-- `Source:` (`organic` / `retrospective-seed`)
+- `Source:` (`organic` / `analysis-intake`)
+- `Verdict:` (`障害`)
+
+> **既存 entry の遡及書き換えは禁止。** `Schema:` を持たない既存 entry は **v1 とみなす**。
+> 読み取り側（`/kiro-postmortem-review`）は **v1 / v2 の両方を受理**し、**v1 を malformed として
+> 集計から落とさない**——欠落項目は `unknown` として数える。
 
 ---
 
@@ -72,90 +96,33 @@ AI は (a) / (b) / (c) を検出時に 1 行で提案する。`(d)` は AI 提�
 
 ---
 
-## タクソノミー (4 軸)
+## タクソノミー（要約・**定義の正本は `rules/taxonomy-reference.md`**）
 
-### 要因分類タクソノミー (R3 / What 軸 — 欠陥が宿る成果物)
-
-| Label | 定義 |
+| 軸 | 概要 |
 |---|---|
-| `requirements-error` | 要件文書自体に誤り・抜け・矛盾・実装詳細混入 |
-| `design-error` | 設計判断の誤り・抜け・整合性なし |
-| `impl-error` | 要件・設計通りでなくコード実装が誤り |
-| `env-config` | 環境設定 / 構成の不整合 (DB パス / 環境変数 / Node バージョン等) |
-| `data-state-dep` | テスト間 / 環境間の状態残存・変動 |
-| `tooling-fragility` | ライブラリ / ツールの仕様や挙動に依存した脆さ |
-| `external-dependency` | 外部サービス・パッケージの破壊的変更・非互換 |
-| `other` | 上記いずれにも明確に分類不可 |
+| **要因分類**（What） | 欠陥が宿る成果物: `requirements-error` / `design-error` / `impl-error` / `env-config` / `data-state-dep` / `tooling-fragility` / `external-dependency` / `other` |
+| **検知工程**（Where） | **V モデル軸**: `code-review` / `unit-test` / `integration-test` / `e2e` / `manual-verification` / `production` / `user-report`　**プロセス軸**: `p1-triage` / `p2-impact-survey` / `ha-ratification` / `gate-adversary` / `gate-judge` / `p5-closure` / `ci` / `post-close` |
+| **対象システム** | `backend` / `frontend` / `cli` / `adapter` / `process` / `other`（＋自由サブスコープ） |
+| **根本要因分類**（Why） | `assumption-error` / `knowledge-gap` / `context-loss` / `verification-gap` / `pattern-misapplication` / `spec-impl-mismatch` / `tooling-trap` / `state-management-gap` / `boundary-violation` / `process-skip` / `other` |
+| **変更分類** | `req-change` / `req-add` / `refactor` / `bugfix` / `test-add` / `ops-change` / `process-improve` / `doc-only` / `other` |
 
-### 検知工程タクソノミー (R4 / Where 軸 — 検証層)
-
-V モデルに従う: 実装ミス → `unit-test`、設計ミス → `integration-test`、要件ミス → `e2e`。
-
-| Label | 定義 | 主に検知すべき成果物 |
-|---|---|---|
-| `code-review` | PR コードレビュー (人間による静的検証) | 命名・hardcoded constant・暗黙の前提 |
-| `unit-test` | 関数・モジュール単体テスト | `impl-error` |
-| `integration-test` | 複数モジュール統合テスト | `design-error` / `env-config` の一部 |
-| `e2e` | エンドツーエンドテスト | `requirements-error` / 表示と API の整合 |
-| `manual-verification` | 手動回帰確認・QA 目視 | 視覚的・体感的検証 |
-| `production` | 本番運用中の検知 (監視 / ログ / アラート) | 性能劣化・低頻度エッジケース |
-| `user-report` | ユーザー報告 (最後の砦) | (全層をすり抜けた状態) |
-
-**ギャップ解釈**: `検知した工程 ≠ 検知すべき工程` の差が「すり抜けた検証層」を示す。例: `検知すべき = unit-test` かつ `検知した = user-report` は「ユニットテスト層がすり抜けた」を意味する。
-
-### 発生機能タクソノミー (R13 / Spec 軸)
-
-Spec 軸のラベルは `.kiro/specs/moira-*` の feature 名から採る（spec を起こすたびにこの表へ追記する）。現時点では Moira の spec が未作成のため、spec 非依存の汎用ラベルのみを置く:
-
-| Label | 定義 |
-|---|---|
-| `tooling` | 開発ツールチェーン (ビルド / テストランナー / バージョン等) |
-| `other` | 上記いずれにも該当しない / 未定義領域 |
-
-サブスコープは `/` 区切りで自由記述可: 例 `moira-core / event-log`。
-
-### 根本要因分類タクソノミー (R14 / Why 軸 — 失敗メカニズム)
-
-| Label | 定義 |
-|---|---|
-| `assumption-error` | 「自明」「不要」と前提誤認した結果のミス |
-| `knowledge-gap` | 仕様 / ライブラリ / ドメインの理解不足 |
-| `context-loss` | 周辺情報・過去の決定・関連箇所の見落とし |
-| `verification-gap` | 検証手段そのものを整備していなかった |
-| `pattern-misapplication` | 別ドメイン / 別文脈のパターンを誤って流用 |
-| `spec-impl-mismatch` | 仕様文と実装意図のズレ |
-| `tooling-trap` | ツール / ライブラリの既知の落とし穴 |
-| `state-management-gap` | テスト間 / セッション間の状態を見落とす |
-| `boundary-violation` | spec / モジュール / レイヤの責務境界を越えた |
-| `process-skip` | レビュー / テスト / 検証の省略判断 |
-| `other` | 上記いずれにも明確に分類不可 |
+**Verification Gap の解釈**: `検知した工程 ≠ 検知すべき工程` の差が「すり抜けた検証層／工程」を示す。
+このギャップは要因分析フローの**入口フィルタそのもの**でもある（等しい事象は母集団に入れない）。
 
 要因分類 (What) と根本要因分類 (Why) は **直交軸**。任意の組み合わせが有効。
-
----
-
-## (What × Why) Quick Reference Map
-
-| 要因分類 (What) | よく合わさる Why | 検知すべき検証層 |
-|---|---|---|
-| `impl-error` | `assumption-error` / `pattern-misapplication` / `process-skip` | `unit-test` |
-| `design-error` | `knowledge-gap` / `context-loss` / `boundary-violation` | `integration-test` |
-| `requirements-error` | `spec-impl-mismatch` / `assumption-error` | `e2e` |
-| `env-config` | `context-loss` / `state-management-gap` | `integration-test` |
-| `data-state-dep` | `state-management-gap` | `integration-test` / `e2e` |
-| `tooling-fragility` | `tooling-trap` / `knowledge-gap` | `e2e` |
-| `external-dependency` | `knowledge-gap` / `tooling-trap` | `integration-test` / `e2e` |
-
-詳細とラベル該当例は `.claude/skills/kiro-postmortem-add/rules/taxonomy-reference.md` を参照。
+(What × Why) の早見表とラベル該当例は `rules/taxonomy-reference.md` を参照。
 
 ---
 
 ## タクソノミーの拡張ポリシー
 
 タクソノミー外のラベルを記録したい場合、`/kiro-postmortem-add` が以下フローで対応する:
+
 1. 既存タクソノミーを候補として提示
-2. 既存ラベルを選ぶ or 「同一操作の中で本ヘッダのタクソノミー定義表に新ラベルを追加」を選ぶ
-3. 拡張時は本 ledger ヘッダと `.claude/skills/kiro-postmortem-add/rules/taxonomy-reference.md` を同時更新する (source of truth ルール)
+2. 既存ラベルを選ぶ or「同一操作の中で正本に新ラベルを追加」を選ぶ
+3. 拡張時は **`rules/taxonomy-reference.md`（正本）を更新**し、本ヘッダの**要約**を必要に応じて追随させる
+   （2026-07-25 改訂・issue #19: 旧「3 ファイル同期」規律のうち `.kiro/specs/defect-pdca/requirements.md` は
+   **対象ファイルが存在しない**ため削除した）
 
 ---
 

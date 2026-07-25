@@ -25,7 +25,7 @@ issue ごとに `moira/changes/issue-N/` 配下へ以下を置く（N は GitHub
 | `impact-map.md` | 影響マップ＋人間断面ビュー（append-only） | P2 影響調査 |
 | `intent-ratification.md` | 意図批准記録（HA 前半集約セッション） | P3 ルーティング裁定 |
 | `fork-batch.md` | fork バッチ（HB）——**発生時のみ** | P4 ゲート実行中 |
-| `closure-report.md` | 閉包レポート | P5 同期閉包確認 |
+| `closure-report.md` | 閉包レポート（＋P6 で**要因分析の一次採取 2 欄**〔障害判定・変更分類〕を記録） | P5 同期閉包確認／P6 |
 
 上記に加えて、必要に応じて受け入れテストレポート等の補助 md をこのディレクトリに追加してよい
 （上表は最小構成であり、これで全ファイル種別を限定するものではない）。

@@ -180,7 +180,12 @@ sonnet worker（subagent）へ派遣してよいが、**クラス判定・ルー
    意味衝突開示は steering §7）。ジャーナル来歴は
    **該当する確定分岐がある場合のみ**（記録条件は `moira-model-update`／目録の既存規律に従う——本フローは
    条件を新設しない）。
-4. **撤回条件の運用**: 「事前批准した意図と agreed 文面の乖離が実害化」した欠陥は `/kiro-postmortem-add`
+4. **要因分析の一次採取（2 欄）**: クローズ時に **①障害判定**（`障害`／`非障害`＋一言の根拠）
+   **②変更分類**（`req-change`/`req-add`/`refactor`/`bugfix`/`test-add`/`ops-change`/`process-improve`/
+   `doc-only`/`other`）を `closure-report.md` と issue クローズコメントに記録する（判定基準・語彙は
+   `.kiro/steering/moira-change-analysis.md` §2・§3 が正）。**採取はこの 2 欄だけ**——分析そのものは
+   ここで走らせない（当該 issue は未分析キューへ載るが、キューは保存せず算出される）。
+5. **撤回条件の運用**: 「事前批准した意図と agreed 文面の乖離が実害化」した欠陥は `/kiro-postmortem-add`
    で literal タグ **`[intent-drift]`** を含めて記録する。未レビュー 2 件で文面批准（逐語レビュー）への
    復帰を再審査する（steering §6 撤回条件・両 review-gate の同型トリガ段落が正）。
 

@@ -19,6 +19,8 @@ Moira の確定ナレッジは `moira/` にある。**唯一の真実源は `moi
 | `moira/examples/todo-playground/` | cc-sdd × Moira 体験用の実案件サンプル |
 | `moira/changes/` | 変更管理フロー（`moira-change`）の作業台帳（**非正典**・issue ごと・削除しない） |
 | `moira/plans/` | 過去 plan（設計来歴・非正典） |
+| `.kiro/postmortem/defects.md` | **障害**の要因分析台帳（`/kiro-postmortem-add` が追記・`/kiro-postmortem-review` が集約） |
+| `.kiro/analysis/` | **非障害**の変更要因分析台帳（`INDEX.md`／`entries/`／`reviews/`）。規範は [moira-change-analysis.md](moira-change-analysis.md)・振り付けは `moira-change-analysis` skill |
 
 ## spec の命名と seeding
 

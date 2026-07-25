@@ -1,42 +1,53 @@
 # Review Trigger Detection Rules
 
-> `/kiro-postmortem-review` の起動トリガー (R9.5) を判定し、AI が能動的に起動提案を出すためのロジック。
+> `/kiro-postmortem-review` の起動トリガーを判定し、AI が能動的に起動提案を出すためのロジック。
 > `/kiro-postmortem-add` 完了直後および通常会話の特定イベント時に評価する。
 >
-> **重要**: AI は本ルールに該当しても、ユーザー確認なしに `/kiro-postmortem-review` を自動起動しない (R9.3, R9.6)。提案フォーマット (本文末尾参照) で 1 行表示するのみ。
+> **重要**: AI は本ルールに該当しても、ユーザー確認なしに `/kiro-postmortem-review` を自動起動しない
+> (R9.3, R9.6)。提案フォーマット (本文末尾参照) で 1 行表示するのみ。
+>
+> **2026-07-25 改訂（issue #19・D-85）**: 旧トリガー (a) `spec-completion`（`/kiro-impl` 完了＝tasks 全 `[x]`）と
+> (c) `new-spec-init`（`/kiro-spec-init` 直前）を**廃止**した——**R/D/T の使い捨て化（issue #40）により
+> `.kiro/specs` は存在せず、両者は構造的に発火しない**（4 トリガーのうち 2 つが死んでいた）。
+> 要因分析フロー（`.kiro/steering/moira-change-analysis.md` §6）の共通トリガーへ差し替える。
 
 ---
 
-## 4 つのトリガー条件 (R9.5)
+## 5 つのトリガー条件
 
 | ID | Trigger | 検出契機 | 自動提案対象 |
 |---|---|---|---|
-| (a) | `spec-completion` | `/kiro-impl <feature>` 完了直後 (該当 spec の tasks がすべて `[x]` になった時点) | ✅ AI が提案 |
-| (b) | `cluster-threshold` | 未レビューエントリ内で同じ `根本要因分類` ラベルまたは同じ `要因分類` ラベルが 2 件以上に達した時点 | ✅ AI が提案 |
-| (c) | `new-spec-init` | `/kiro-spec-init <新 spec>` で新規 spec を開始する直前 | ✅ AI が提案 |
-| (d) | `user-explicit` | ユーザーが「振り返りしたい」「レビューして」等を明示要求した時点 | ❌ AI は提案不要 (ユーザーが直接起動) |
+| (a) | `queue-threshold` | **未分析キューが 10 件以上**（キューは保存せず算出——「クローズ済み issue − 両台帳に entry のあるキー」） | ✅ AI が提案 |
+| (b) | `cluster-threshold` | 未レビューエントリ内で同じ `根本要因分類` ラベルまたは同じ `要因分類` ラベルが **2 件以上**に達した時点 | ✅ AI が提案 |
+| (c) | `periodic` | 前回の横断集約（`.kiro/analysis/reviews/` の最新ファイル日付）から **1 か月**経過 | ✅ AI が提案 |
+| (d) | `escaped-defect` | **すり抜けギャップのある欠陥**を検出（「検知すべき工程 ≠ 実際に検知した工程」。フィルタは `moira-change-analysis` §2.1）——**キューに積むだけ**で、この事象自体では起動提案しない | ❌（積むのみ） |
+| (e) | `user-explicit` | ユーザーが「振り返りしたい」「レビューして」等を明示要求した時点 | ❌ AI は提案不要 (ユーザーが直接起動) |
 
-(d) は他トリガー条件成立の有無に関わらず常に許容される (R9.7)。
+(e) は他トリガー条件成立の有無に関わらず常に許容される。
+
+> **(d) が起動提案の対象でない理由**: 欠陥検出のたびに「起票しますか」と割り込むと、運用ごと嫌われる。
+> 検出は積むだけにし、起動は (a)(c)(e) が決める（D-84・D-85）。
 
 ---
 
 ## 判定ロジック (擬似コード)
 
 ```python
-def detect_review_triggers(ledger, session_context) -> list[str]:
+def detect_review_triggers(ledger, analysis_index, closed_issues, session_context) -> list[str]:
     """
     /kiro-postmortem-add 完了直後 or AI 応答生成時に評価する。
     返り値の triggers が空でなければ AI は起動提案を出す。
     """
     triggers = []
 
-    # (a) /kiro-impl 完了直後
-    # 検出方法: session_context.just_completed_command が "/kiro-impl"
-    #   または会話直近で tasks.md の全 [x] チェックを観測した
-    if session_context.just_completed == "/kiro-impl":
-        triggers.append("spec-completion")
+    # (a) 未分析キューが 10 件以上（キューは保存せず毎回算出）
+    analyzed_keys = analysis_index.keys | {e.key for e in ledger.entries if e.key}
+    queue = [i for i in closed_issues if qualified_key(i) not in analyzed_keys]
+    if len(queue) >= 10:
+        triggers.append("queue-threshold")
 
     # (b) 同 根本要因分類 / 同 要因分類 が未レビューで 2 件以上
+    #     v1(10 項目) entry も対象に含める——欠落項目は unknown として扱い、malformed で落とさない
     unreviewed = [e for e in ledger.entries if e.status == "recorded"]
     root_cause_counts = Counter(e.root_cause_category for e in unreviewed)
     cause_counts = Counter(e.cause_category for e in unreviewed)
@@ -45,32 +56,31 @@ def detect_review_triggers(ledger, session_context) -> list[str]:
     elif any(c >= 2 for c in cause_counts.values()):
         triggers.append("cluster-threshold")
 
-    # (c) /kiro-spec-init 直前
-    # 検出方法: ユーザーが /kiro-spec-init を打とうとしている / 直前に予告した
-    if session_context.about_to_invoke == "/kiro-spec-init":
-        triggers.append("new-spec-init")
+    # (c) 前回の横断集約から 1 か月経過
+    if last_review_date(analysis_index) is None or months_since(last_review_date(analysis_index)) >= 1:
+        triggers.append("periodic")
 
     return triggers
 ```
 
 ---
 
-## AI 提案フォーマット (R9.6)
+## AI 提案フォーマット
 
 トリガー検出時、AI は **1 行で** 以下フォーマットで提案する。複数提案を縦に並べない。
 
 ```
-/kiro-postmortem-review を起動しますか？ 未レビュー X 件・該当トリガー: {triggers}
+/kiro-postmortem-review を起動しますか？ 未分析 X 件・該当トリガー: {triggers}
 ```
 
 ### 具体例
 
 ```
-/kiro-postmortem-review を起動しますか？ 未レビュー 5 件・該当トリガー: spec-completion + cluster-threshold (assumption-error が 3 件)
+/kiro-postmortem-review を起動しますか？ 未分析 11 件・該当トリガー: queue-threshold + cluster-threshold (assumption-error が 3 件)
 ```
 
 ```
-/kiro-postmortem-review を起動しますか？ 未レビュー 2 件・該当トリガー: new-spec-init (defect-pdca 開始予定)
+/kiro-postmortem-review を起動しますか？ 未分析 4 件・該当トリガー: periodic (前回集約から 1 か月)
 ```
 
 ---
@@ -87,7 +97,10 @@ def detect_review_triggers(ledger, session_context) -> list[str]:
 
 ## 注意事項
 
-- 本ルールは **提案** であり、ユーザーが最終判断する (R9.3)
-- 同トリガー条件で連続して提案するとノイズになる → セッション中 1 回提案して却下されたら、明確に状況が変化するまで再提案しない
-- `(d) user-explicit` はトリガーリストに含めない (ユーザーが直接起動するため AI 提案は不要)
-- AI は `.kiro/postmortem/defects.md` を Read してから cluster-threshold を判定する (頻度集計は ledger を読まないとできない)
+- 本ルールは **提案** であり、ユーザーが最終判断する (R9.3)。
+- 同トリガー条件で連続して提案するとノイズになる → セッション中 1 回提案して却下されたら、
+  明確に状況が変化するまで再提案しない。
+- `(e) user-explicit` はトリガーリストに含めない (ユーザーが直接起動するため AI 提案は不要)。
+- AI は `.kiro/postmortem/defects.md` と `.kiro/analysis/INDEX.md` を Read してから判定する
+  （頻度集計と未分析キューの算出は両台帳を読まないとできない）。
+- **未分析キューをファイルに保存しない**——保存すると台帳と GitHub の実状態がずれた瞬間に嘘の件数を出す（D-85）。
