@@ -220,7 +220,7 @@ flowchart TB
 |---|---|---|
 | **B-a** | **入口を A0 に一本化**し、P6 クローズと**すり抜けギャップのある欠陥検出**（§2.1 のフィルタ通過分——DRIFTED・discrepancy・後続 issue の影響調査での発覚・deferred/intent-drift の実害化・マージ後 CI 赤）を A0 のキュー投入契機として**明示配線**する。**ラウンド内で決着した指摘は配線しない**（母集団を試行錯誤で汚さない） | F1 |
 | **B-b** | **死んだトリガ (a)(c) を廃止**し、共通トリガ（§7: キュー 10 件／月次／P6 クローズで積む／明示）へ差し替える。`cluster-threshold` は集約側の契機として維持 | F2・F7 |
-| **B-c** | **発生機能タクソノミーの出所を差し替え**: `.kiro/specs/moira-*` の feature 名 → **対象システム**（`backend`/`frontend`/`cli`/`adapter`/`process`）＋自由サブスコープ | F2 |
+| **B-c** | **発生機能タクソノミーの出所を差し替え**: `.kiro/specs/moira-*` の feature 名 → **対象システム**（正本 R13 のラベル。`process` を含む・`other` あり）＋自由サブスコープ | F2 |
 | **B-d** | **seed 投入手順を削除**（ledger 不在時は空 ledger を作る）。`templates/seed-entries.md` は廃止または「参考例（投入しない）」へ降格 | F3 |
 | **B-e** | **`.kiro/specs/defect-pdca/requirements.md` への同期義務を削除**（同期は ledger ヘッダ＋`taxonomy-reference.md` の 2 ファイル） | F4 |
 | **B-f** | **検知工程タクソノミーにプロセス軸を追加**（§6。V モデル軸と併存） | F5 |
