@@ -240,7 +240,7 @@ filter-repo による履歴移管（sdd-workshop#42）はコミット履歴と�
 - `moira#20` https://github.com/PrimeBrains/moira/issues/20 — **OPEN**（同上。本 entry の同型現存例として未解消）
 
 #### 12. 再発防止策　`inferred`
-**出口: `.claude/skills/moira-change/SKILL.ja.md` の P2 ＋ `moira/changes/templates/impact-map.template.md`。** 影響調査に「同型掃射」欄を必須化する——(a) 変更の同型パターンを 1 つ以上の grep 式として書き、(b) その全ヒットを影響マップの行に写像し、(c) 閉包時に残存 0 を機械証跡で示す。あわせて影響マップに「配布経路に乗るか（`moira adapter install` の managed file か）」の列を足し、配布物を優先行として扱う。
+**出口: `.claude/skills/moira-change/SKILL.ja.md` の P2 ＋ `.claude/skills/moira-change/templates/impact-map.template.md`。** 影響調査に「同型掃射」欄を必須化する——(a) 変更の同型パターンを 1 つ以上の grep 式として書き、(b) その全ヒットを影響マップの行に写像し、(c) 閉包時に残存 0 を機械証跡で示す。あわせて影響マップに「配布経路に乗るか（`moira adapter install` の managed file か）」の列を足し、配布物を優先行として扱う。
 
 #### 13. 検知すべき工程　`inferred`
 `p2-impact-survey` — 移管変更（sdd-workshop#42）の影響調査で「本文中の環境前提」を波及先として列挙すべきだった。
@@ -381,7 +381,7 @@ HA 裁定 B5（旧 issue #36）は「訂正跨ぎと遡及書き込みは同じ�
 - `moira#8` https://github.com/PrimeBrains/moira/issues/8 — CLOSED（同上）
 
 #### 12. 再発防止策　`inferred`
-**出口: `.kiro/steering/moira-change-management.md` §3/§5 ＋ `moira/changes/templates/closure-report.template.md`。** HA の裁定を「行」として記録することを必須化する——各裁定に (a) 着地先の面（M/D/P/S）と成果物パス、(b) 反映済みか否かの二択、を持たせ、P5 閉包で全行が反映済みであることを照合する。#11 以降の閉包レポートは既にこの対応表を持つため、**規範側へ昇格して恒久化する**のが本 Try の実体である。
+**出口: `.kiro/steering/moira-change-management.md` §3/§5 ＋ `.claude/skills/moira-change/templates/closure-report.template.md`。** HA の裁定を「行」として記録することを必須化する——各裁定に (a) 着地先の面（M/D/P/S）と成果物パス、(b) 反映済みか否かの二択、を持たせ、P5 閉包で全行が反映済みであることを照合する。#11 以降の閉包レポートは既にこの対応表を持つため、**規範側へ昇格して恒久化する**のが本 Try の実体である。
 
 #### 13. 検知すべき工程　`inferred`
 `ha-ratification` — 批准の時点で「この意図はどの文面のどの行に着地するか」を問えば、正典文面が未追随であることはその場で見える。
@@ -523,7 +523,7 @@ issue #6 で §2.10 の参照実装同期を行った際、pre-admission 検証�
 - `moira#17` https://github.com/PrimeBrains/moira/issues/17 — CLOSED（同上）
 
 #### 12. 再発防止策　`inferred`
-**出口: `.claude/skills/moira-change/SKILL.ja.md` の P2 ＋ `moira/changes/templates/impact-map.template.md`（#0002 の Try と同一の器）。** 正典が列挙した対象に触れる変更では、**列挙 n 件を影響マップの n 行へ展開する**ことを必須化し、閉包で「n 行すべて resolved」を照合する。これは #0002 の「同型掃射」と同じ器であり、対象がコードか文書かの違いにすぎない。
+**出口: `.claude/skills/moira-change/SKILL.ja.md` の P2 ＋ `.claude/skills/moira-change/templates/impact-map.template.md`（#0002 の Try と同一の器）。** 正典が列挙した対象に触れる変更では、**列挙 n 件を影響マップの n 行へ展開する**ことを必須化し、閉包で「n 行すべて resolved」を照合する。これは #0002 の「同型掃射」と同じ器であり、対象がコードか文書かの違いにすぎない。
 
 #### 13. 検知すべき工程　`inferred`
 `p5-closure` — issue #6 の閉包時に「§2.10 の列挙 4 例に対し実装／witness が 4 件あるか」を照合していれば、そこで未被覆 3 件が可視化できた。
@@ -596,7 +596,7 @@ C（R1–R6）・M（R7: MODEL §7#20 追補）・D（R8: D-79 注記）・P（R
 - `moira#13` https://github.com/PrimeBrains/moira/issues/13 — CLOSED（同上）
 
 #### 12. 再発防止策　`inferred`
-**二段構え。(a) 出口: `.dependency-cruiser.cjs` または ESLint ルール ＋ CI。** `fs.writeFileSync` の直接呼び出しを `moira/backend/src/atomic-write.ts` 以外で**静的に禁止**し、違反を CI で fail させる（既知の例外——`init` の create-once シード——は許可リストで明示する）。これにより「同型が他にあるか」を人間が数える必要が消える。**(b) 出口: `.claude/skills/moira-change/SKILL.ja.md` の P2**（#0002・#0006 と同一の器）: 同型掃射の必須化。
+**二段構え。(a) 出口: `moira/backend/.dependency-cruiser.cjs` または ESLint ルール ＋ CI。** `fs.writeFileSync` の直接呼び出しを `moira/backend/src/atomic-write.ts` 以外で**静的に禁止**し、違反を CI で fail させる（既知の例外——`init` の create-once シード——は許可リストで明示する）。これにより「同型が他にあるか」を人間が数える必要が消える。**(b) 出口: `.claude/skills/moira-change/SKILL.ja.md` の P2**（#0002・#0006 と同一の器）: 同型掃射の必須化。
 
 #### 13. 検知すべき工程　`inferred`
 `p2-impact-survey` — #15 の影響調査で「同じ書き込み方式を持つファイル」を波及先として列挙すべきだった。
@@ -669,7 +669,7 @@ C（R1–R6・R11）・M（R7）・D（R8: D-79／R9: D-11 の初の実装状態
 - `moira#20` https://github.com/PrimeBrains/moira/issues/20 — **OPEN**（同型クラスタの未解消例）
 
 #### 12. 再発防止策　`inferred`
-**出口: `.dependency-cruiser.cjs` / ESLint ＋ CI（#0007 の (a) と同一）。** 本件が示すのは「人間の列挙は経路単位では漏れる」ことであり、**工程やチェックリストの追加では塞げない**。`writeFileSync` 直呼びの静的禁止に加え、`load*` → `save*` の間にロック取得が無い経路を検出する lint ルールがあればなお良い（実装難度は高い——最低限、直呼び禁止を先に置く）。
+**出口: `moira/backend/.dependency-cruiser.cjs` / ESLint ＋ CI（#0007 の (a) と同一）。** 本件が示すのは「人間の列挙は経路単位では漏れる」ことであり、**工程やチェックリストの追加では塞げない**。`writeFileSync` 直呼びの静的禁止に加え、`load*` → `save*` の間にロック取得が無い経路を検出する lint ルールがあればなお良い（実装難度は高い——最低限、直呼び禁止を先に置く）。
 
 #### 13. 検知すべき工程　`inferred`
 `p2-impact-survey` — 対象を**書き込み経路**単位で列挙していれば `import members` は P2 で見えた。
