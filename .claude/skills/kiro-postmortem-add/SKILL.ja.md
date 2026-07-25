@@ -50,7 +50,7 @@ metadata:
   破棄済みデータを復活させない・Entry ID を衝突させないため
 - テンプレ内の相対リンクは **ledger の位置（`.kiro/postmortem/`）基準**で書かれている（そのまま展開してよい）
 
-### Step 3: 17 フィールドのドラフト作成
+### Step 3: 16 フィールドのドラフト作成
 
 証跡束・会話文脈・git diff・変更ファイルパスから 16 項目のドラフト値を推論する。
 **各項目に出所ラベルを付ける**——`derived`（履歴から写した・出典必須）／`inferred`（AI 推論・根拠必須）／
@@ -99,7 +99,7 @@ metadata:
 - 各項目に**出所ラベルが付いている**ことを検証する（欠けていれば同じく差し戻し）
 - 検証通過したら:
   - 既存 ledger から最大 Entry ID を抽出 → 次 ID を算出
-  - `templates/entry-template.md` をテンプレ展開（17 フィールド ＋ メタ: `Key`・`Schema: v2`・`Verdict: 障害`）
+  - `templates/entry-template.md` をテンプレ展開（16 フィールド ＋ メタ: `Key`・`Schema: v2`・`Verdict: 障害`）
   - `Status: recorded`、`Source:` は `organic`（通常追記）または `analysis-intake`（A0 からの委譲）
   - `Created:` に現在の ISO 8601 UTC タイムスタンプ
   - `.kiro/postmortem/defects.md` の `## Entries` セクション末尾に Edit で append（既存内容を保持）

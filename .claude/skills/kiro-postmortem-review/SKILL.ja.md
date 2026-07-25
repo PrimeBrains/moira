@@ -66,7 +66,7 @@ metadata:
 - Malformed 判定（**真に壊れているものだけ**）:
   - H3 見出しが無い／メタ行（`Status:` / `Entry ID:`）が欠落 → malformed
   - 本文が空 → malformed
-  - **項目数が 17 に満たないことは malformed の理由にしない**
+  - **項目数が 16 に満たないことは malformed の理由にしない**
 - Malformed entry の ID をリスト化、レポート Summary に記載してスキップ
 - Scope filter 適用 (該当する場合):
   - `since:DATE` → `Created` / `analyzed-at` が DATE 以降のもののみ

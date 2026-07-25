@@ -1,7 +1,10 @@
-# Moira 要因分析フロー DFD（ドラフト v3）
+# Moira 要因分析フロー DFD（v4）
 
-> **状態**: **draft v3**（2026-07-25。**人間承認待ち**——issue #19 本文の順序拘束「まず DFD をつくって
-> ユーザーの承認を得てから実装に移ること」に従い、本ドラフトの承認前に実装成果物〔skill・台帳・steering〕を作らない）
+> **状態**: **v3 で人間承認済み（2026-07-25）→ v4 は確定ゲート（`doc-refine`）の指摘反映**。
+> issue #19 本文の順序拘束「まず DFD をつくってユーザーの承認を得てから実装に移ること」は満たしている
+> （承認は v3 に対して下り、実装はその後に着手した）。v4 の変更は**事実誤りの訂正と表現の限定**であって
+> 設計の変更ではない（差分は下記）。本書は**来歴文書**であり規範ではない——規範は
+> [`.kiro/steering/moira-change-analysis.md`](../../.kiro/steering/moira-change-analysis.md)。
 > **対象 issue**: [#19](https://github.com/PrimeBrains/moira/issues/19)
 > **v1 → v2 の差分**（HA 第 1 ラウンドのユーザー裁定を反映）: ①**障害／非障害を最初に振り分ける受付工程（A0）を新設**
 > ②**既存の障害フロー（`/kiro-postmortem-add` ／ `/kiro-postmortem-review`）も as-is で DFD に起こし、
@@ -205,7 +208,7 @@ flowchart TB
 | **F2** | **`.kiro/specs` 不在に依存した死んだ配線が 3 つ。** ①発生機能タクソノミーは「ラベルは `.kiro/specs/moira-*` の feature 名から採る」と規定 ②トリガ (a) `spec-completion`（`/kiro-impl` 完了＝tasks 全 `[x]`）③トリガ (c) `new-spec-init` | `.kiro/` 直下に **`specs` ディレクトリ自体が存在しない**（R/D/T 使い捨て化・issue #40 の帰結）。出典は `defects.md` ヘッダ「発生機能タクソノミー」節・`rules/trigger-detection.md`・`SKILL.md`／**`SKILL.ja.md` の両方**（両ファイルは並行翻訳であり、片方だけの是正では不整合が残る）。**4 トリガのうち 2 つが構造的に発火しない**——起動は事実上 (b) と (d) のみに縮退 | **Important** |
 | **F3** | **skill が破棄済みの seed を復活させる。** `defects.md` ヘッダは「Moira への切り替えに伴いリセット済み（旧プロトタイプ由来の entry は破棄）」と宣言するが、`/kiro-postmortem-add` Step 2 は **ledger 不在時に seed 3 件を投入**する手順のまま | `SKILL.md` Step 2「`templates/seed-entries.md` の 3 件 seed body を取得…seed #0001-#0003 がすべて `Status: recorded` で含まれる」＋**`SKILL.ja.md` 同 Step（同一記述）** vs `defects.md` ヘッダの破棄宣言。**台帳を作り直すと破棄したはずのデータが蘇り、現行 entry #0001 と Entry ID が衝突する** | **Important** |
 | **F4** | **存在しないファイルへの同期義務。** タクソノミー拡張時に「`.kiro/specs/defect-pdca/requirements.md` の AC.1 も更新してください」と通知する（3 ファイル同期規律の 1 つ）。あわせて Critical Constraints の「既存 spec 不変（`.kiro/specs/{core-data-model,evm-engine,progress-tracking,dashboard}/`）」も**存在しないディレクトリ**を守っている | 当該 spec は存在しない（`.kiro/specs` ごと不在）。`SKILL.md` Step 4・`SKILL.ja.md` 同 Step の**両方**。**規律の 1/3 が死んでいる** | Important |
-| **F4′** | **10→16 項目化で既存 entry が集計から黙って消える危険（本 issue が作り込みうる欠陥）。** `/kiro-postmortem-review` Step 2 は「必須 10 項目のいずれかが欠ける → malformed → ID 報告のうえスキップ」と規定する。項目を 17 に上げつつ既存 #0001 を as-is 保持（B-g）すると、**唯一の既存 entry が malformed 判定でスキップされる** | `kiro-postmortem-review` SKILL.md／SKILL.ja.md Step 2 の malformed 判定条件と、B-g（遡及書き換え禁止）の組み合わせ | **Critical**（作り込み防止） |
+| **F4′** | **10→16 項目化で既存 entry が集計から黙って消える危険（本 issue が作り込みうる欠陥）。** `/kiro-postmortem-review` Step 2 は「必須 10 項目のいずれかが欠ける → malformed → ID 報告のうえスキップ」と規定する。項目を 16 に上げつつ既存 #0001 を as-is 保持（B-g）すると、**唯一の既存 entry が malformed 判定でスキップされる** | `kiro-postmortem-review` SKILL.md／SKILL.ja.md Step 2 の malformed 判定条件と、B-g（遡及書き換え禁止）の組み合わせ | **Critical**（作り込み防止） |
 | **F5** | **検知工程タクソノミーが V モデル前提**（`code-review`/`unit-test`/`integration-test`/`e2e`/`manual-verification`/`production`/`user-report`）で、本リポの実工程（P2 影響調査・HA・敵対ラウンド・独立採点・P5 閉包・codex レビュー）を表す語がない | entry #0001 の「検知した工程」は `manual-verification` だが、実際の検知点は「後続コマンドの 404 → node ID 突合」であり工程名としては**クローズ後の発覚**に近い。**ラベルが実態を表せていない** | Important |
 | **F6** | **旧プロトタイプの残骸。** 推論例のパスが `evm-studio/client/src/lib/formatters.ts`（旧プロダクト） | SKILL.md Step 3 の表 | Minor |
 | **F7** | **`cluster-threshold`（同ラベル 2 件）は entry 1 件では発火しない**——F1 と合わさり、review が起動する現実的な契機が (d) ユーザー明示のみになっている | `defects.md` の `## Steering 反映ログ` は**空**（review が一度も完走していない） | Important |
@@ -221,7 +224,7 @@ flowchart TB
 | **B-d** | **seed 投入手順を削除**（ledger 不在時は空 ledger を作る）。`templates/seed-entries.md` は廃止または「参考例（投入しない）」へ降格 | F3 |
 | **B-e** | **`.kiro/specs/defect-pdca/requirements.md` への同期義務を削除**（同期は ledger ヘッダ＋`taxonomy-reference.md` の 2 ファイル） | F4 |
 | **B-f** | **検知工程タクソノミーにプロセス軸を追加**（§6。V モデル軸と併存） | F5 |
-| **B-g** | **項目を 10 → 17 に拡張**（C 系と共通様式）。**既存 entry #0001 は as-is 保持**（遡及書き換えをしない——欠落欄は `unknown` として集計側で扱う） | — |
+| **B-g** | **項目を 10 → 16 に拡張**（C 系と共通様式）。**既存 entry #0001 は as-is 保持**（遡及書き換えをしない——欠落欄は `unknown` として集計側で扱う） | — |
 | **B-h** | 旧プロトタイプのパス例を現行の実パスへ差し替え | F6 |
 | **B-i** | **パーサを 2 スキーマ受理にする**（`/kiro-postmortem-review` Step 2）: entry に `Schema: v1`（10 項目）／`v2`（16 項目）メタを持たせ、**v1 entry は malformed にせず、欠落項目を `unknown` として集計に載せる**。`Schema:` 欠落の既存 entry は **v1 とみなす**（#0001 を書き換えずに済む） | F4′ |
 | **B-j** | **タクソノミー正本の一本化**（§6）: `rules/taxonomy-reference.md` を**正本**とし、`defects.md` ヘッダは**要約＋正本へのポインタ**に降格する。「single source of truth と言いながら 2 ファイル同期」という F4 と同型の矛盾を残さない | F4 と同型の構造 |

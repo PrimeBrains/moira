@@ -109,7 +109,8 @@ def detect_review_triggers(ledger, analysis_index, reviews_dir, closed_issues, s
 - 本ルールは **提案** であり、ユーザーが最終判断する (R9.3)。
 - 同トリガー条件で連続して提案するとノイズになる → セッション中 1 回提案して却下されたら、
   明確に状況が変化するまで再提案しない。
-- `(e) user-explicit` はトリガーリストに含めない (ユーザーが直接起動するため AI 提案は不要)。
+- `(f) user-explicit` はトリガーリストに含めない (ユーザーが直接起動するため AI 提案は不要)。
+  `(d) post-close`・`(e) escaped-defect` も提案対象ではない（前者は母集団入りの意味しか持たず、後者は記録のみ）。
 - AI は `.kiro/postmortem/defects.md`・`.kiro/analysis/INDEX.md` を Read し、`.kiro/analysis/reviews/` を `ls` してから判定する
   （頻度集計と未分析キューの算出は両台帳を読まないとできない）。
 - **未分析キューをファイルに保存しない**——保存すると台帳と GitHub の実状態がずれた瞬間に嘘の件数を出す（D-85）。

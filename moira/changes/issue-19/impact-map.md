@@ -187,7 +187,7 @@ F8 障害判定そのものが記録されない。
 | 「既存履歴 15 本」「クローズ済み issue 15 本」「15 本中 7 本」 | **本リポのクローズ済み issue は 13 本**（#1・#2・#5・#6・#7・#8・#9・#10・#11・#13・#15・#16・#17）。`gate-round-records.md` を持つのは**本リポ 8 本**（#1・#2・#7・#8・#9・#10・#11・#15） | `gh issue list --repo PrimeBrains/moira --state closed`／`ls moira/changes/*/gate-round-records.md` |
 | 観測 A の対象に `issue-43` を含めていた／観測 C を「#39・#42 が旧リポ」と書いていた | **`issue-39`・`issue-42`・`issue-43` の 3 本すべてが旧リポ（`sdd-workshop`）由来** | `moira/changes/issue-43/request.md` の原文リンクが `https://github.com/PrimeBrains/sdd-workshop/issues/43` |
 | F1 の証拠として「#16 の `gate-round-records.md`」を挙げていた | **#16 に `gate-round-records.md` は存在しない**。実出典は `moira/changes/issue-16/closure-report.md`（指摘件数の記述自体は正しい） | `ls moira/changes/issue-16/` |
-| 「本リポの同番号と衝突する」 | **衝突しうる**（本リポの最大 issue 番号は現在 #19 のため実衝突は未発生） | `gh issue list --state all` |
+| 「本リポの同番号と衝突する」 | **衝突しうる**（本リポの最大 issue 番号は #20〔本 issue の追跡 issue〕のため実衝突は未発生） | `gh issue list --state all` |
 
 **この訂正が設計に与える影響**: なし——7 項目が既存入力に存在しないという**中核の観測は無傷**
 （実地の grep で再確認済み）。誤っていたのは母数と本数であり、三系統（導出／推論／採取）の設計根拠は変わらない。
