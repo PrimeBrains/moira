@@ -1,7 +1,7 @@
 ---
 name: kiro-postmortem-review
 description: Aggregate entries across BOTH ledgers — .kiro/postmortem/defects.md (defects) and .kiro/analysis/entries/ (non-defect changes) — produce a 4-axis frequency report (要因分類 × 検知工程 × 対象システム × 根本要因分類, plus 変更分類) and clusters, extract Try candidates, and hand them off to /kiro-steering-custom for steering reflection. Invoke when the unanalyzed queue reaches 10, a month has passed since the last aggregation, when the same root-cause label crosses 2 unreviewed entries, or on user demand.
-allowed-tools: Read, Edit, Glob, Grep, Bash
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, AskUserQuestion, Skill
 argument-hint: <scope filter, optional. e.g. "since:2026-07-01" or "system:backend">
 metadata:
   origin: "custom"
@@ -53,8 +53,10 @@ metadata:
 - **非障害台帳**をパース: `.kiro/analysis/entries/*.md` の frontmatter（`key` / `schema` / `status` /
   `verdict`）と 16 見出しの本文を抽出
 - **2 スキーマ受理（最重要）**:
-  - `Schema: v2` → 17 項目（現行様式）
-  - `Schema: v1` **または `Schema:` 行を持たない既存 entry** → **旧 10 項目様式とみなす**。
+  - `Schema: v2` → 16 項目（現行様式）
+  - `Schema: v1` **または schema 指定を持たない既存 entry** → **旧 10 項目様式とみなす**。
+    **判定は大小文字非依存**——障害台帳は本文メタ行 `Schema: v2`、非障害台帳は frontmatter `schema: v2` と
+    表記が異なるため、`schema`／`Schema` のどちらでも同じに読む（非障害 entry を v1 と誤判定しない）。
     新様式の項目に対応がないものは **`unknown` として集計に載せる**——**v1 を malformed にしない**
   - 旧 10 項目 → 新項目への対応: 発生機能→対象システム（**旧ラベルは対象システムに写らないため `unknown`**）／
     発生した不具合→事象／検知した工程→14／検知すべき工程→13／検知できなかった理由→15／
@@ -159,6 +161,9 @@ Step 6 のバグ別 walkthrough の中で verdict が収集されるため、独
 
 2. **Ledger 一括更新 (1 トランザクション相当。**両台帳**が対象——非障害 entry は frontmatter の
    `status` を更新する)**:
+   - **非障害 entry（`.kiro/analysis/entries/`）の状態語彙は別系統**: `drafted` → `ratified` → **`aggregated`**。
+     集約に載せた時点で frontmatter の `status` を `aggregated` にする。**`steered`／`reviewed` を書かない**
+     （障害側の語彙。Try の steering 化は `## Steering 反映ログ` が一元記録する）
    - Approved + steering 化成功: 該当 entry の `Status:` → `steered`、`## Steering 反映ログ` に back-reference を append
    - Approved + steering 化失敗: Status 変更せず (`recorded` 保持)、Try は次回再提示
    - Rejected: 該当 entry の `Status:` → `reviewed`

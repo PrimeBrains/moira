@@ -1,6 +1,6 @@
 <!--
   分析票（非障害）テンプレート。`.kiro/analysis/entries/<repo>-<番号>.md` として保存。
-  規範: .kiro/steering/moira-change-analysis.md §3（17 項目）・§4（出所ラベル）・§5（タクソノミー）
+  規範: .kiro/steering/moira-change-analysis.md §3（16 項目）・§4（出所ラベル）・§5（タクソノミー）
   {{...}} を実値に置換する。
 
   【最重要】各項目の見出し行末に必ず出所ラベルを付ける:
@@ -75,7 +75,9 @@ verdict: {{障害|非障害}}
 
 - **仕組み帰責（必須で一度は問う）**: SKILL／steering／テンプレート／工程配線／タクソノミー／
   人間タッチポイント設計に穴がなかったか → {{MECHANISM_ATTRIBUTION}}
-- **根本要因分類**: `{{LABEL}}`（正本: `.claude/skills/kiro-postmortem-add/rules/taxonomy-reference.md`）
+- **根本要因分類**（Why 軸・正本 R14）: `{{LABEL}}`
+- **要因分類**（What 軸・正本 R3）: `{{LABEL}}`　<!-- 横断集約の 4 軸のうち What 軸。障害側 entry と揃える -->
+  （正本: `.claude/skills/kiro-postmortem-add/rules/taxonomy-reference.md`）
 - **詳細**: {{WHY_IT_FIRED}}
 
 <!-- 該当する場合のみ literal タグを本文に含める（他機構の撤回条件が grep で数える計器）:

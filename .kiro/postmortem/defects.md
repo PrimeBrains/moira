@@ -1,6 +1,6 @@
 # 不具合要因分析 Ledger
 
-> AI 駆動の開発作業で発生した**障害**（不具合）1 件ごとに 17 項目を記録する **追記型 Markdown ledger**。
+> AI 駆動の開発作業で発生した**障害**（不具合）1 件ごとに 16 項目を記録する **追記型 Markdown ledger**。
 > `/kiro-postmortem-add` で append、`/kiro-postmortem-review` で集約分析。
 > 抽出された Try は `/kiro-steering-custom` 経由で `.kiro/steering/*.md` に反映する PDCA 基盤。
 >
@@ -24,21 +24,23 @@
 | Phase | Skill / 操作 | 起動者 | タイミング |
 |---|---|---|---|
 | **Plan** | `/kiro-postmortem-add` 起動 | AI (能動提案) または ユーザー／要因分析フローの受付から委譲 | 障害と判定された時点 |
-| **Do** | 17 項目を対話補完して ledger に append | ユーザー (AI ドラフト提案) | Plan に続けて即時 |
+| **Do** | 16 項目を対話補完して ledger に append | ユーザー (AI ドラフト提案) | Plan に続けて即時 |
 | **Check** | `/kiro-postmortem-review` 起動 | ユーザー (主体)、AI は提案者 | 後述のトリガー条件のいずれか |
 | **Act** | 抽出された Try を `/kiro-steering-custom` で steering 化 | ユーザー (AI 補助) | Check の結果として |
 
 ### Check の起動トリガー
 
-`.claude/skills/kiro-postmortem-add/rules/trigger-detection.md` が正。要約:
+**ID の正は `.kiro/steering/moira-change-analysis.md` §6**。判定ロジックは
+`.claude/skills/kiro-postmortem-add/rules/trigger-detection.md`。以下は**要約**（食い違えば steering が勝つ）:
 
 | ID | Trigger | 検出契機 |
 |---|---|---|
 | (a) | `queue-threshold` | 未分析キューが 10 件以上（キューは保存せず算出） |
 | (b) | `cluster-threshold` | 未レビュー entry で同じ `根本要因分類` または `要因分類` が 2 件以上 |
-| (c) | `periodic` | 前回の横断集約から 1 か月経過 |
-| (d) | `escaped-defect` | すり抜けギャップのある欠陥の検出——**キューに積むだけ**（起動提案はしない） |
-| (e) | `user-explicit` | ユーザーが明示的に振り返りを要求（常時許容） |
+| (c) | `periodic` | 前回の横断集約から 1 か月経過（集約が一度も無いときは発火しない） |
+| (d) | `post-close` | `moira-change` P6 クローズ（分析は走らせない——クローズ自体が母集団入り） |
+| (e) | `escaped-defect` | すり抜けギャップのある欠陥の検出——`.kiro/analysis/INDEX.md` の「すり抜け検出ログ」に記録（起動提案はしない） |
+| (f) | `user-explicit` | ユーザーが明示的に振り返りを要求（常時許容） |
 
 AI は (a) / (b) / (c) を検出時に 1 行で提案する。**AI は ユーザー確認なしで `/kiro-postmortem-review` を起動しない。**
 
@@ -46,7 +48,7 @@ AI は (a) / (b) / (c) を検出時に 1 行で提案する。**AI は ユーザ
 
 ## Entry スキーマ
 
-**現行は `Schema: v2`（17 項目）。** 各項目には**出所ラベル**（`derived` / `inferred` / `captured` / `unknown`）を
+**現行は `Schema: v2`（16 項目）。** 各項目には**出所ラベル**（`derived` / `inferred` / `captured` / `unknown`）を
 必ず付ける。**根拠を示せない欄は `unknown` と記録し、空欄・推測での穴埋めを禁じる。**
 
 | # | 項目 | 形式 |
@@ -73,7 +75,7 @@ AI は (a) / (b) / (c) を検出時に 1 行で提案する。**AI は ユーザ
 - `Status:` (`recorded` / `reviewed` / `steered`)
 - `Entry ID:` (zero-padded 4-digit int, e.g. `0001`)
 - `Key:` (repo 修飾の変更キー e.g. `moira#16`。無修飾の `#N` を書かない)
-- `Schema:` (`v1` = 旧 10 項目／`v2` = 現行 17 項目)
+- `Schema:` (`v1` = 旧 10 項目／`v2` = 現行 16 項目)
 - `Created:` (ISO 8601 timestamp)
 - `Source:` (`organic` / `analysis-intake`)
 - `Verdict:` (`障害`)
@@ -98,13 +100,16 @@ AI は (a) / (b) / (c) を検出時に 1 行で提案する。**AI は ユーザ
 
 ## タクソノミー（要約・**定義の正本は `rules/taxonomy-reference.md`**）
 
-| 軸 | 概要 |
+| 軸 | 正本の節 |
 |---|---|
-| **要因分類**（What） | 欠陥が宿る成果物: `requirements-error` / `design-error` / `impl-error` / `env-config` / `data-state-dep` / `tooling-fragility` / `external-dependency` / `other` |
-| **検知工程**（Where） | **V モデル軸**: `code-review` / `unit-test` / `integration-test` / `e2e` / `manual-verification` / `production` / `user-report`　**プロセス軸**: `p1-triage` / `p2-impact-survey` / `ha-ratification` / `gate-adversary` / `gate-judge` / `p5-closure` / `ci` / `post-close` |
-| **対象システム** | `backend` / `frontend` / `cli` / `adapter` / `process` / `other`（＋自由サブスコープ） |
-| **根本要因分類**（Why） | `assumption-error` / `knowledge-gap` / `context-loss` / `verification-gap` / `pattern-misapplication` / `spec-impl-mismatch` / `tooling-trap` / `state-management-gap` / `boundary-violation` / `process-skip` / `other` |
-| **変更分類** | `req-change` / `req-add` / `refactor` / `bugfix` / `test-add` / `ops-change` / `process-improve` / `doc-only` / `other` |
+| **要因分類**（What・欠陥が宿る成果物） | R3 |
+| **検知工程**（Where・V モデル軸＋プロセス軸） | R4 |
+| **対象システム** | R13 |
+| **根本要因分類**（Why・失敗メカニズム） | R14 |
+| **変更分類** | R15 |
+
+**ラベルの値集合は本ヘッダに列挙しない**——列挙すれば正本の複製になり、同期義務が復活するため
+（2026-07-25・issue #19）。値は正本 `rules/taxonomy-reference.md` を参照する。
 
 **Verification Gap の解釈**: `検知した工程 ≠ 検知すべき工程` の差が「すり抜けた検証層／工程」を示す。
 このギャップは要因分析フローの**入口フィルタそのもの**でもある（等しい事象は母集団に入れない）。
@@ -120,7 +125,9 @@ AI は (a) / (b) / (c) を検出時に 1 行で提案する。**AI は ユーザ
 
 1. 既存タクソノミーを候補として提示
 2. 既存ラベルを選ぶ or「同一操作の中で正本に新ラベルを追加」を選ぶ
-3. 拡張時は **`rules/taxonomy-reference.md`（正本）を更新**し、本ヘッダの**要約**を必要に応じて追随させる
+3. 拡張時は **`rules/taxonomy-reference.md`（正本）を更新**する。本ヘッダと
+   `templates/ledger-header.md` の**要約**は、正本を参照するだけの記述に留めてあるため、
+   ラベル追加のたびの追随は不要（軸そのものを増減したときだけ直す）
    （2026-07-25 改訂・issue #19: 旧「3 ファイル同期」規律のうち `.kiro/specs/defect-pdca/requirements.md` は
    **対象ファイルが存在しない**ため削除した）
 

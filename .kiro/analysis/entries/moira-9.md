@@ -19,7 +19,7 @@ verdict: 非障害
 - 台帳: `moira/changes/issue-9/{request,impact-map,intent-ratification,gate-round-records,closure-report}.md`
 - 敵対ラウンド記録: `moira/changes/issue-9/gate-round-records.md`（**項目 14 の一次証跡**）
 - 差分: 本リポ `67ec0ff`（"issue #9 日付ソース 3 択トグル…（#9）（#18）"）
-- 母集団確認: `gh issue list --state open`（2026-07-25 時点: #3・#4・#19 のみ）
+- 母集団確認: `gh issue list --repo PrimeBrains/moira --state all`（2026-07-25 時点: クローズ済み 13 本・open は #3・#4・#19）
 
 ---
 
@@ -89,7 +89,8 @@ localStorage 永続・E2E spec）
   沈黙は起票時に検出されなかった。目録の様式（「どんな場面の話か」「他にありえた選び方」「外すとどうなるか」）は
   **選ばれた案の妥当性**は問うが、**その案が前提している利用者像**を明示的には問わない。
   結果、単一の運用モード（「早く終わりそうな順に見たい」）を暗黙の前提として既定が固まった。
-- **根本要因分類**: `assumption-error`（「自明」「不要」と前提誤認した結果——ここでは「主表示は 1 つで足りる」）
+- **根本要因分類**（Why 軸）: `assumption-error`（「自明」「不要」と前提誤認した結果——ここでは「主表示は 1 つで足りる」）
+- **要因分類**（What 軸）: `design-error`（欠陥が宿るのは表示ソースの設計判断——要件文でも実装ミスでもない）
 - **詳細**: 当時の判断は「早く終わりそうな順に見える」というソート用途の要請から出発しており、その用途では
   予測を主にするのが自然だった。前提が誤っていたのではなく、**前提が 1 つしか置かれていなかった**。
   基準線を正として運用するチームの存在は、実運用で当事者が声を上げるまで設計に入らなかった。
@@ -99,8 +100,10 @@ localStorage 永続・E2E spec）
 ## 9. 同件調査対象　`derived`
 
 走査した母集団: (i) 本台帳の既存 entry（本件が初回のため 0 件）(ii) `.kiro/postmortem/defects.md` の
-既存 entry（#0001 の 1 件）(iii) 本リポのクローズ済み issue に対応する `moira/changes/issue-*/` 全 15 本
-（#1・#2・#5・#6・#7・#8・#9・#10・#11・#13・#15・#16・#17・#43＋旧リポ由来 3 本は対象外）。
+既存 entry（#0001 の 1 件）(iii) **本リポのクローズ済み issue 13 本**（#1・#2・#5・#6・#7・#8・#9・#10・#11・
+#13・#15・#16・#17。出典: `gh issue list --repo PrimeBrains/moira --state closed`）と、対応する
+`moira/changes/issue-*/` 台帳。**旧リポ由来の `issue-39/42/43` は対象外**（`sdd-workshop` 番号——
+`moira/changes/issue-43/request.md` の原文リンクで確認）。**#19（本 issue）は進行中のため母集団外**。
 
 ## 10. 同件調査結果　`inferred`（意味検索・網羅性は保証しない）
 
@@ -113,8 +116,8 @@ localStorage 永続・E2E spec）
 - **`moira#9` の閉包時に「follow-up issue 化を推奨」とされた作業が、issue として存在しない。**
   閉包レポート ②「できないことになったこと」は、値依存 EARS（1-6, 8-11, 13-15）の
   **シナリオ固有値での E2E 回帰**を明示 deferred とし「follow-up issue 化を推奨」と記した。
-  しかし 2026-07-25 時点の open issue は **#3・#4・#19 のみ**で、対応する追跡 issue は**起票されていない**
-  （`gh issue list --state open` で確認）。閉包レポート自身が「これは本 issue の postcondition ではなく
+  しかし 2026-07-25 時点で、対応する追跡 issue は **open にも closed にも存在しない**
+  （`gh issue list --repo PrimeBrains/moira --state all` で確認。open は #3・#4・#19 のみ）。閉包レポート自身が「これは本 issue の postcondition ではなく
   将来作業」と位置づけたため、**deferred 行としての追跡要件（後続 issue＋owner＋再評価条件）を
   課されないまま推奨に留まった**——結果、推奨は誰にも拾われていない。
 - 他の同件リンクはなし。
@@ -171,6 +174,12 @@ kiro-scenario Round 1 の Critical 5 件）は**本件の是正工程内で決�
 | `unknown` | 0 |
 
 **`unknown` の欄**: なし。
+
+**訂正履歴（doc-refine ラウンド 1・2026-07-25）**: 項目 9 の母集団を「全 15 本（#43 含む）」から
+「クローズ済み 13 本（#43 は旧リポゆえ除外・#19 は進行中）」へ訂正。項目 11 の根拠コマンドを
+`--state open` から `--state all` へ訂正（「存在しない」の主張には closed も確かめる必要があるため）。
+項目 8 に **要因分類（What 軸）** を追加（横断集約の 4 軸を障害側 entry と揃えるため）。
+いずれも独立の事実検証・敵対レビューの指摘による。
 
 **正直開示（実走 1 本の結果として）**:
 

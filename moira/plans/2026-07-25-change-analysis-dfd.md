@@ -8,6 +8,14 @@
 > 実地監査で見つかった欠陥と改訂案を §3 に明示**（「既存の障害フローも正しいか自信がないので描いて考えたい」）
 > ③起動トリガの閾値を未分析 10 件へ ④変更範囲の語彙は既存 7 値に統一 ⑤欠落 7 項目は AI 推論＋人間確認、
 > 一次採取は 2 欄のみ追加
+> **v3 → v4 の差分**（`doc-refine` ラウンド 1・独立の敵対レビューと事実検証の指摘を反映）: ①**「17 項目」は誤りで
+> 実体は 16 項目**（issue #19 本文の列挙も 16）——全箇所を訂正 ②**既存台帳は 15 本ではなく、本リポのクローズ済み
+> 13 本**（`issue-39/42/43` はいずれも旧リポ番号）③タクソノミー正本を 1 ファイルに確定した裁定（B-j）を、
+> to-be 図・フォルダ構成・保存先表にも反映（3 箇所が「2 ファイル同期」のままだった）④入口フィルタの適用範囲を
+> 「欠陥検出を契機とする追加投入のみ」に限定（クローズ由来の母集団は間引かない）⑤すり抜け検出の永続先を明記
+> ⑥トリガ ID を steering に一本化（`cluster-threshold` を含む 6 個）⑦F1 の証拠出典を訂正（#16 に
+> `gate-round-records.md` は無い——実出典は同 issue の閉包レポート）
+>
 > **v2 → v3 の差分**（HA 第 2 ラウンドのユーザー裁定を反映）: **欠陥検出を入口にする範囲を「すり抜けギャップの
 > あるもの」に限定**した（§2.1 新設・§7 (d) 改訂）。v2 は「ゲート／CI／検知器の検出」を無条件に入口にしており、
 > **実装中の試行錯誤まで母集団に入って集計が意味をなさなくなる**穴があった（ユーザー指摘）。判定は既存スキーマの
@@ -16,7 +24,7 @@
 > **変更を通す**工程列であるのに対し、本フローは**通り終えた変更を振り返る**工程列である。前者の出口（P6 クローズ）が
 > 後者の入口になる。既存ゲート・既存の委譲辺は変更しない。
 > **先例**: [`moira/plans/2026-07-19-change-management-dfd.md`](2026-07-19-change-management-dfd.md)（変更管理 DFD）と同じ体裁。
-> **一次観測**: 設計根拠の実地監査（既存台帳 15 本・17 項目の導出可能性／既存障害フローの現況）は
+> **一次観測**: 設計根拠の実地監査（既存台帳 13 本・16 項目の導出可能性／既存障害フローの現況）は
 > [`moira/changes/issue-19/impact-map.md`](../changes/issue-19/impact-map.md) §前提調査と本書 §3.2 が持つ。
 
 ## 0. 一文の定義とスコープ
@@ -29,7 +37,8 @@
 
 ### スコープの正直な宣言（先に限界を書く）
 
-1. **全項目の自動充填は成立しない。** 実地監査の結論: 17 項目のうち**7 項目は既存の入力にそもそも存在しない**
+1. **全項目の自動充填は成立しない。** 実地監査の結論（**2026-07-25 以前にクローズされた変更**についての観測。
+   同日以降は §8 の一次採取で 2 欄が `captured` になる）: 16 項目のうち**7 項目は既存の入力にそもそも存在しない**
    （障害判定・変更分類・根本要因・再発防止策・検知すべき工程・検知できなかった理由・検知対策）。
    本フローは**AI 推論＋人間確認**で埋め、**各欄に出所ラベルを必須**とする（§5.1）。
    「履歴を読めば全部わかる」とは主張しない。
@@ -69,8 +78,8 @@ flowchart TB
     A0 -->|非障害| C1["C 変更分析系<br/>（新設）"]
     A0 -->|判定と根拠を必ず記録| JRN[("振り分け記録<br/>= 各 entry の障害判定欄")]:::persist
 
-    B1 --> B2["B2 10→17 項目で記入<br/>（/kiro-postmortem-add 改訂）"]
-    C1 --> C2["C2 17 項目で記入<br/>（新 skill）"]
+    B1 --> B2["B2 10→16 項目で記入<br/>（/kiro-postmortem-add 改訂）"]
+    C1 --> C2["C2 16 項目で記入<br/>（新 skill）"]
 
     B2 --> HX["HX 人間確認<br/>（4 群だけ読む）"]:::human
     C2 --> HX
@@ -127,7 +136,12 @@ flowchart TB
 > その判定は記録されなければ後から検証できない。振り分けを暗黙にすると「非障害と判断して記録しなかった」件が
 > 母集団から黙って消える——変更管理フローの「黙って落ちる波及先を作らない」と同じ原理の自己適用。
 
-### 2.1 入口フィルタ——「すり抜けギャップ」基準（裁定済み・v3）
+### 2.1 入口フィルタ——「すり抜けギャップ」基準（裁定済み・v3。**適用範囲は v4 で限定**）
+
+> **適用範囲（v4 訂正）**: 本フィルタが掛かるのは **欠陥検出を契機とする追加投入**だけである。
+> **P6 クローズ由来の母集団（§9）には掛からない**——クローズした変更は障害・非障害を問わず全件が分析対象。
+> また判定に使う工程は**投入時点では暫定判定でよい**（分析後に §5 の項目 13/14 として確定する）——
+> でなければ「分析しないと投入可否が決まらない」循環になる。
 
 **検出の主体（誰が見つけたか）では線を引かない。** ゲート・CI・検知器の検出をすべて入口にすると、
 **実装中の試行錯誤（round1 の指摘 → round2 で修正、赤いテストを直しながら進む等）まで母集団に入り、
@@ -187,11 +201,11 @@ flowchart TB
 
 | ID | 欠陥 | 確認方法・証拠 | 重大度 |
 |---|---|---|---|
-| **F1** | **入口が変更管理フローと繋がっていない。** 敵対ゲートの Critical/Important 指摘・`decision-conformance` の DRIFTED・E2E の discrepancy・CI 失敗が不具合台帳へ流れる配線がない | `defects.md` の entry は **#0001（2026-07-05）の 1 件のみ**。以後クローズした変更管理 issue は 15 本あり、その `gate-round-records.md` には Critical/Important の実指摘が記録されている（例 #16「M 面＝round2 で 1 Important」「D 面＝round2 で 1 Critical」）が、**postmortem entry は 1 件も増えていない** | **Critical** |
+| **F1** | **入口が変更管理フローと繋がっていない。** 敵対ゲートの Critical/Important 指摘・`decision-conformance` の DRIFTED・E2E の discrepancy・CI 失敗が不具合台帳へ流れる配線がない | `defects.md` の entry は **#0001（2026-07-05）の 1 件のみ**。以後クローズした変更管理 issue は **13 本**（`gh issue list --state closed`）あり、その台帳には Critical/Important の実指摘が記録されている（例 #16: `moira/changes/issue-16/closure-report.md`「M 面＝round2 で 1 Important」「D 面＝round2 で 1 Critical」。※#16 に `gate-round-records.md` は無く、出典は閉包レポート。同ファイルを持つのは本リポ 8 本）が、**postmortem entry は 1 件も増えていない** | **Critical** |
 | **F2** | **`.kiro/specs` 不在に依存した死んだ配線が 3 つ。** ①発生機能タクソノミーは「ラベルは `.kiro/specs/moira-*` の feature 名から採る」と規定 ②トリガ (a) `spec-completion`（`/kiro-impl` 完了＝tasks 全 `[x]`）③トリガ (c) `new-spec-init` | `.kiro/` 直下に **`specs` ディレクトリ自体が存在しない**（R/D/T 使い捨て化・issue #40 の帰結）。出典は `defects.md` ヘッダ「発生機能タクソノミー」節・`rules/trigger-detection.md`・`SKILL.md`／**`SKILL.ja.md` の両方**（両ファイルは並行翻訳であり、片方だけの是正では不整合が残る）。**4 トリガのうち 2 つが構造的に発火しない**——起動は事実上 (b) と (d) のみに縮退 | **Important** |
 | **F3** | **skill が破棄済みの seed を復活させる。** `defects.md` ヘッダは「Moira への切り替えに伴いリセット済み（旧プロトタイプ由来の entry は破棄）」と宣言するが、`/kiro-postmortem-add` Step 2 は **ledger 不在時に seed 3 件を投入**する手順のまま | `SKILL.md` Step 2「`templates/seed-entries.md` の 3 件 seed body を取得…seed #0001-#0003 がすべて `Status: recorded` で含まれる」＋**`SKILL.ja.md` 同 Step（同一記述）** vs `defects.md` ヘッダの破棄宣言。**台帳を作り直すと破棄したはずのデータが蘇り、現行 entry #0001 と Entry ID が衝突する** | **Important** |
 | **F4** | **存在しないファイルへの同期義務。** タクソノミー拡張時に「`.kiro/specs/defect-pdca/requirements.md` の AC.1 も更新してください」と通知する（3 ファイル同期規律の 1 つ）。あわせて Critical Constraints の「既存 spec 不変（`.kiro/specs/{core-data-model,evm-engine,progress-tracking,dashboard}/`）」も**存在しないディレクトリ**を守っている | 当該 spec は存在しない（`.kiro/specs` ごと不在）。`SKILL.md` Step 4・`SKILL.ja.md` 同 Step の**両方**。**規律の 1/3 が死んでいる** | Important |
-| **F4′** | **10→17 項目化で既存 entry が集計から黙って消える危険（本 issue が作り込みうる欠陥）。** `/kiro-postmortem-review` Step 2 は「必須 10 項目のいずれかが欠ける → malformed → ID 報告のうえスキップ」と規定する。項目を 17 に上げつつ既存 #0001 を as-is 保持（B-g）すると、**唯一の既存 entry が malformed 判定でスキップされる** | `kiro-postmortem-review` SKILL.md／SKILL.ja.md Step 2 の malformed 判定条件と、B-g（遡及書き換え禁止）の組み合わせ | **Critical**（作り込み防止） |
+| **F4′** | **10→16 項目化で既存 entry が集計から黙って消える危険（本 issue が作り込みうる欠陥）。** `/kiro-postmortem-review` Step 2 は「必須 10 項目のいずれかが欠ける → malformed → ID 報告のうえスキップ」と規定する。項目を 17 に上げつつ既存 #0001 を as-is 保持（B-g）すると、**唯一の既存 entry が malformed 判定でスキップされる** | `kiro-postmortem-review` SKILL.md／SKILL.ja.md Step 2 の malformed 判定条件と、B-g（遡及書き換え禁止）の組み合わせ | **Critical**（作り込み防止） |
 | **F5** | **検知工程タクソノミーが V モデル前提**（`code-review`/`unit-test`/`integration-test`/`e2e`/`manual-verification`/`production`/`user-report`）で、本リポの実工程（P2 影響調査・HA・敵対ラウンド・独立採点・P5 閉包・codex レビュー）を表す語がない | entry #0001 の「検知した工程」は `manual-verification` だが、実際の検知点は「後続コマンドの 404 → node ID 突合」であり工程名としては**クローズ後の発覚**に近い。**ラベルが実態を表せていない** | Important |
 | **F6** | **旧プロトタイプの残骸。** 推論例のパスが `evm-studio/client/src/lib/formatters.ts`（旧プロダクト） | SKILL.md Step 3 の表 | Minor |
 | **F7** | **`cluster-threshold`（同ラベル 2 件）は entry 1 件では発火しない**——F1 と合わさり、review が起動する現実的な契機が (d) ユーザー明示のみになっている | `defects.md` の `## Steering 反映ログ` は**空**（review が一度も完走していない） | Important |
@@ -209,9 +223,9 @@ flowchart TB
 | **B-f** | **検知工程タクソノミーにプロセス軸を追加**（§6。V モデル軸と併存） | F5 |
 | **B-g** | **項目を 10 → 17 に拡張**（C 系と共通様式）。**既存 entry #0001 は as-is 保持**（遡及書き換えをしない——欠落欄は `unknown` として集計側で扱う） | — |
 | **B-h** | 旧プロトタイプのパス例を現行の実パスへ差し替え | F6 |
-| **B-i** | **パーサを 2 スキーマ受理にする**（`/kiro-postmortem-review` Step 2）: entry に `Schema: v1`（10 項目）／`v2`（17 項目）メタを持たせ、**v1 entry は malformed にせず、欠落項目を `unknown` として集計に載せる**。`Schema:` 欠落の既存 entry は **v1 とみなす**（#0001 を書き換えずに済む） | F4′ |
+| **B-i** | **パーサを 2 スキーマ受理にする**（`/kiro-postmortem-review` Step 2）: entry に `Schema: v1`（10 項目）／`v2`（16 項目）メタを持たせ、**v1 entry は malformed にせず、欠落項目を `unknown` として集計に載せる**。`Schema:` 欠落の既存 entry は **v1 とみなす**（#0001 を書き換えずに済む） | F4′ |
 | **B-j** | **タクソノミー正本の一本化**（§6）: `rules/taxonomy-reference.md` を**正本**とし、`defects.md` ヘッダは**要約＋正本へのポインタ**に降格する。「single source of truth と言いながら 2 ファイル同期」という F4 と同型の矛盾を残さない | F4 と同型の構造 |
-| **B-k** | **撤回条件の literal タグ規律を 17 項目化後も維持**（項目 8「根本要因」へ明示的に継承）: `[deferred-important]`／`[rdt-disposal]`／`[intent-drift]` を該当時に本文へ含める。これらは `moira-change-management.md` §6 と `moira-verification.md` の撤回条件が **grep で数える計器**であり、書き換えで落とすと**別の機構の計器が黙って死ぬ** | 作り込み防止 |
+| **B-k** | **撤回条件の literal タグ規律を 16 項目化後も維持**（項目 8「根本要因」へ明示的に継承）: `[deferred-important]`／`[rdt-disposal]`／`[intent-drift]` を該当時に本文へ含める。これらは `moira-change-management.md` §6 と `moira-verification.md` の撤回条件が **grep で数える計器**であり、書き換えで落とすと**別の機構の計器が黙って死ぬ** | 作り込み防止 |
 
 > **改訂しないもの（意図的）**: PDCA の 4 フェーズ構成、Status 3 値（`recorded`/`reviewed`/`steered`）、
 > append-only 規律、全項目非空での append 拒否、`/kiro-steering-custom` 経由でのみ steering を触る規律、
@@ -236,9 +250,9 @@ flowchart TB
     SRCB[("証跡束<br/>issue 全コメント・台帳 5 種・gate-round-records・git diff")]:::persist --> ADD
 
     ADD["/kiro-postmortem-add（改訂）"]
-    ADD --> D17["17 項目をドラフト<br/>各欄に出所ラベル<br/>derived / inferred / captured / unknown"]
+    ADD --> D17["16 項目をドラフト<br/>各欄に出所ラベル<br/>derived / inferred / captured / unknown"]
 
-    TAX2[("共通タクソノミー（2 ファイル同期）<br/>defects.md ヘッダ ＋ taxonomy-reference.md<br/>発生機能＝対象システム5値（B-c）<br/>検知工程＝V モデル軸＋プロセス軸（B-f）")]:::persist -.-> D17
+    TAX2[("共通タクソノミー（正本 1 ファイル・B-j）<br/>rules/taxonomy-reference.md<br/>※defects.md ヘッダは軸だけのポインタ<br/>対象システム軸（B-c）／プロセス工程軸（B-f）")]:::persist -.-> D17
 
     D17 --> HXB["HX 人間確認<br/>読むのは 4 群だけ<br/>障害判定 / 根本要因 / 再発防止策 / 検知対策"]:::human
     HXB -->|全項目非空でなければ append 拒否（不変）| D17
@@ -271,7 +285,7 @@ flowchart TB
 
 **as-is（§3.1）との差分の読み方**: 赤い破線ノードは**除去・廃止されるもの**（seed 自動投入・死んだ
 2 トリガ・存在しない spec への同期義務・入口にしない事象）。太字の追加は**入口の明示配線（B-a）**・
-**17 項目化（B-g）**・**タクソノミーの出所差し替えとプロセス軸追加（B-c/B-f）**・**集約が両台帳をまたぐこと**。
+**16 項目化（B-g）**・**タクソノミーの出所差し替えとプロセス軸追加（B-c/B-f）**・**集約が両台帳をまたぐこと**。
 `recorded`→`reviewed`→`steered` の Status 遷移、全項目非空での append 拒否、`/kiro-steering-custom` 経由でのみ
 steering を触る規律、ユーザー確認なしに起動しない規律は**図のとおり不変**である。
 
@@ -286,11 +300,11 @@ steering を触る規律、ユーザー確認なしに起動しない規律は**
 | **A6 横断集約** | **両台帳**の全 entry | 4 軸（変更分類 × 根本要因 × 対象システム × 検知工程ギャップ）の頻度と同件クラスタ → **Try 候補** | 集約レポート＋Try 候補 |
 | **HY Try 裁定** | Try 候補 | 採否を人間が裁定。採用分は**既存の出口**へ（`/kiro-steering-custom` ／ issue 起票→`moira-change`）——**本フローは自分で確定文書を書き換えない** | 反映済み Try |
 
-## 5. 分析票の項目定義（17 項目・B/C 共通）
+## 5. 分析票の項目定義（16 項目・B/C 共通）
 
 | # | 項目 | 既定の充填系統 | 語彙／様式 |
 |---|---|---|---|
-| 1 | 対象システム | derived | `backend` / `frontend` / `cli` / `adapter` / **`process`**（skill・steering・確定文書・台帳）。**第 5 値を追加**——プロセス側だけを変える変更が実在（#1/#5/#10/#43/#19）。複数可 |
+| 1 | 対象システム | derived | 正本 R13 の 6 ラベル（`backend` / `frontend` / `cli` / `adapter` / **`process`**〔skill・steering・確定文書・台帳〕/ `other`）。**`process` を追加**——プロセス側だけを変える変更が実在（#1/#5/#10/#19）。複数可 |
 | 2 | 事象 | inferred（素材は derived） | Given / When / Then ＋**期待値／実際値**。非障害では「Then＝変更後にこうなる」 |
 | 3 | 障害判定 | **A0 で判定 → HX で人間確定** | `障害` / `非障害`＋根拠。**振り分けの正本**（§2） |
 | 4 | 変更分類 | inferred | `req-change` / `req-add` / `refactor` / `bugfix` / `test-add` / `ops-change` / `process-improve` / `doc-only` / `other` |
@@ -330,7 +344,7 @@ steering を触る規律、ユーザー確認なしに起動しない規律は**
 |---|---|
 | 要因分類（What） | 既存をそのまま再利用 |
 | 根本要因分類（Why） | 既存をそのまま再利用（項目 8 の「仕組み帰責」は散文で補う） |
-| 発生機能（Spec 軸） | **出所を差し替え**（B-c）——対象システム 5 値＋自由サブスコープ |
+| 発生機能（Spec 軸） | **出所を差し替え**（B-c）——対象システム 6 ラベル（`other` を含む）＋自由サブスコープ |
 | 検知工程（Where 軸） | **プロセス軸を追加**（下記・V モデル軸と併存） |
 | 変更分類 | **新設**（§5 #4） |
 
@@ -351,13 +365,14 @@ steering を触る規律、ユーザー確認なしに起動しない規律は**
 
 **既定は手動起動＋AI からの 1 行提案**（**AI はユーザー確認なしに分析を起動しない**——既存 R9.3/R9.6 の規律を踏襲）。
 
-| ID | トリガ | 検出契機 |
-|---|---|---|
-| (a) | `queue-threshold` | 未分析キューが **10 件**以上（裁定値） |
-| (b) | `periodic` | 前回分析から **1 か月**経過 |
-| (c) | `post-close` | `moira-change` P6 クローズ直後——**キューに積むだけ**（クローズを重くしない） |
-| (d) | `escaped-defect` | **すり抜けギャップのある欠陥**（§2.1 のフィルタ通過分）を検出——**即時にキューへ積むだけ**（分析の起動は (a)(b)(e) に従う。都度の確認は行わない） |
-| (e) | `user-explicit` | ユーザー明示（常時許容・AI 提案不要） |
+| ID | トリガ | 検出契機 | AI 提案 |
+|---|---|---|---|
+| (a) | `queue-threshold` | 未分析キューが **10 件**以上（裁定値） | ✅ |
+| (b) | `cluster-threshold` | 未レビュー entry で同じ根本要因／要因分類が 2 件以上（既存 PDCA の契機を維持・B-b） | ✅ |
+| (c) | `periodic` | 前回の**横断集約**から **1 か月**経過（集約が一度も無いときは発火しない） | ✅ |
+| (d) | `post-close` | `moira-change` P6 クローズ——**分析は走らせない**。キューは算出値ゆえ「積む」操作は実体を持たない（正直開示） | ❌ |
+| (e) | `escaped-defect` | **すり抜けギャップのある欠陥**（§2.1 通過分）を検出——**その場で `INDEX.md` の「すり抜け検出ログ」に 1 行残す**（キューは算出値なので、記録しないと観測が消える） | ❌ |
+| (f) | `user-explicit` | ユーザー明示（常時許容） | ❌ |
 
 **廃止**: 旧 (a) `spec-completion`・旧 (c) `new-spec-init`（`.kiro/specs` 不在で構造的に発火しない。§3.2 F2）。
 **cron 等の外部スケジューラは配線しない**（§0-5）。
@@ -370,13 +385,13 @@ steering を触る規律、ユーザー確認なしに起動しない規律は**
 2. **変更分類**（§5 #4 の 9 値から 1 つ）
 
 **それ以外は採取しない**——検知工程・根本要因まで実行時に書かせるとクローズ工程が重くなり、
-ratified steering の改訂範囲も大きくなるため（裁定済み）。過去 15 本は採取不能なので、
+ratified steering の改訂範囲も大きくなるため（裁定済み）。過去 13 本は採取不能なので、
 いずれにせよ推論経路（§5.1 `inferred`）は必須である。
 
 ## 9. 母集団とキー規約
 
 - **キー**: `<repo>#<number>`（例 `moira#16`）。**無修飾の `#N` を禁じる**——`moira/changes/issue-39/42/43` は
-  旧リポ `PrimeBrains/sdd-workshop` の番号であり本リポの同番号と**衝突する**（実地確認済み）。
+  旧リポ `PrimeBrains/sdd-workshop` の番号であり本リポの同番号と**衝突しうる**（本リポの最大 issue 番号は現在 #19 ゆえ実衝突は未発生・`issue-43/request.md` の原文リンクで旧リポ由来を確認済み）。
   **これは新判断ではなく既存 D-80（「移管前文書中の `#N` は旧リポ番号を指す——読み替え方針は canonical に置き、
   本文は書き換えない」・`agreed`）の本台帳への適用**である。D-80 は「本文を書き換えず読み替え方針で解く」と定めて
   いるので、**既存文書の `#N` を遡って修飾しない**——修飾を義務づけるのは**本台帳が新規に書くキー**に限る。
@@ -393,7 +408,7 @@ ratified steering の改訂範囲も大きくなるため（裁定済み）。�
 - **規範**: `.kiro/steering/moira-change-analysis.md`（新規）——A0 の判定基準・項目定義・タクソノミー・トリガ・正直枠。
   skill は振り付けのみを持ち規範を複製しない（`moira-change` と同型）。
 - **台帳**: `.kiro/analysis/`（entry 1 件 1 ファイル `<repo>-<number>.md` ＋ `INDEX.md`）。
-  17 項目＋出所ラベルで 1 entry が大きいため、単一 append ファイル方式ではなく**分割＋索引**とする。
+  16 項目＋出所ラベルで 1 entry が大きいため、単一 append ファイル方式ではなく**分割＋索引**とする。
 - **コードは書かない**（C 級なし）——抽出は表記ゆれのため regex 不可（実測）＝AI の意味読解が要る。
   列挙は `gh`・`git`・`ls` で足りる。
 - **ドッグフーディング**: 確定後に**実走 1 本**（直近クローズ issue 1 件）——埋まらない欄が `unknown` として
@@ -405,13 +420,13 @@ ratified steering の改訂範囲も大きくなるため（裁定済み）。�
 リポジトリルート
 ├── .kiro/
 │   ├── steering/
-│   │   ├── moira-change-analysis.md        ★新規  本フローの【規範】——A0 判定基準・17 項目定義・
+│   │   ├── moira-change-analysis.md        ★新規  本フローの【規範】——A0 判定基準・16 項目定義・
 │   │   │                                          タクソノミーの所在・トリガ・正直枠
 │   │   └── moira-change-management.md      ◇改訂  P6 に一次採取 2 欄（障害判定・変更分類）を追加（§8）
 │   │
 │   ├── postmortem/                                【B 障害系の台帳】（既存・場所は変えない）
 │   │   └── defects.md                      ◇改訂  障害 entry 本体＋タクソノミー定義＋Steering 反映ログ
-│   │                                              10→17 項目化・プロセス軸追加・既存 #0001 は as-is 保持
+│   │                                              10→16 項目化・プロセス軸追加・既存 #0001 は as-is 保持
 │   │
 │   └── analysis/                           ★新規  【C 非障害系の台帳】
 │       ├── README.md                       ★新規  台帳の位置づけ・キー規約（repo 修飾）・出所ラベルの読み方
@@ -420,20 +435,20 @@ ratified steering の改訂範囲も大きくなるため（裁定済み）。�
 │       │   ├── moira-9.md
 │       │   ├── moira-16.md
 │       │   └── …
-│       └── reviews/                        ★新規  A6 横断集約の結果（実施ごとに 1 ファイル）
+│       └── reviews/                        ☆予定  A6 横断集約の結果（実施ごとに 1 ファイル）※初回集約時に作成
 │           └── 2026-08-01.md                      4 軸頻度・同件クラスタ・Try 候補と裁定
 │
 ├── .claude/skills/
 │   ├── moira-change-analysis/              ★新規  【本フローの振り付け】A0 受付・C 系記入・A6 集約
 │   │   ├── SKILL.md / SKILL.ja.md                 （障害 entry の記録は /kiro-postmortem-add へ委譲）
 │   │   └── templates/
-│   │       ├── analysis-entry.template.md         17 項目＋出所ラベルの雛形
-│   │       ├── index.template.md
+│   │       ├── analysis-entry.template.md         16 項目＋出所ラベルの雛形
+│   │       ├── index-row.template.md
 │   │       └── aggregate-report.template.md
 │   │
-│   ├── kiro-postmortem-add/                ◇改訂  B-b〜B-f・B-h（死んだ配線の除去・17 項目化）
+│   ├── kiro-postmortem-add/                ◇改訂  B-b〜B-f・B-h（死んだ配線の除去・16 項目化）
 │   │   ├── SKILL.md / SKILL.ja.md
-│   │   ├── rules/taxonomy-reference.md     ◇改訂  タクソノミー定義の【正本の片割れ】（もう一方は defects.md ヘッダ）
+│   │   ├── rules/taxonomy-reference.md     ◇改訂  タクソノミー定義の【唯一の正本】（B-j。defects.md ヘッダは軸のポインタ）
 │   │   ├── rules/trigger-detection.md      ◇改訂  共通トリガへ差し替え
 │   │   └── templates/seed-entries.md       ✗廃止  破棄済み seed の自動投入をやめる（B-d）
 │   │
@@ -464,7 +479,7 @@ ratified steering の改訂範囲も大きくなるため（裁定済み）。�
 | **未分析キュー** | **保存しない（算出値）** ——「クローズ済み issue − 両台帳に entry のあるキー」で毎回求める | — | — |
 | 横断集約の結果と Try 裁定 | `.kiro/analysis/reviews/<日付>.md` | `/kiro-postmortem-review`（改訂版） | 記録としての正典 |
 | Try の steering 反映ログ | `.kiro/postmortem/defects.md` の `## Steering 反映ログ`（既存の場所を維持） | `/kiro-postmortem-review` | 記録としての正典 |
-| タクソノミー定義 | `.kiro/postmortem/defects.md` ヘッダ ＋ `kiro-postmortem-add/rules/taxonomy-reference.md`（**この 2 ファイルのみ同期**） | `/kiro-postmortem-add` | **正典** |
+| タクソノミー定義 | `kiro-postmortem-add/rules/taxonomy-reference.md`（**唯一の正本**・B-j。`defects.md` ヘッダは軸のみのポインタで値を持たない） | `/kiro-postmortem-add` | **正典** |
 | 一次採取 2 欄（障害判定・変更分類） | `moira/changes/issue-N/closure-report.md` ＋ issue クローズコメント | `moira-change` P6 | 非正典（台帳）／issue は人間向け正本 |
 | 設計の来歴 | `moira/plans/2026-07-25-change-analysis-dfd.md` | 本 issue | 非規範（来歴） |
 
@@ -480,6 +495,6 @@ ratified steering の改訂範囲も大きくなるため（裁定済み）。�
 - 変更を止めない・合否を出さない（検証器ではない）。
 - 全項目を自動で埋めない（§0-1）。
 - 確定文書を自分で書き換えない（Try は既存の出口へ渡す）。
-- 過去 15 本の全数分析を本 issue では行わない（実走 1 本のみ）。
+- 過去 13 本の全数分析を本 issue では行わない（実走 1 本のみ）。
 - 網羅的な同件検出を保証しない（§0-4）。
 - 既存 PDCA 思想を作り替えない——直すのは**死んだ配線**だけ（§3.3）。

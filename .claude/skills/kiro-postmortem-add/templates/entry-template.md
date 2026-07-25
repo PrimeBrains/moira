@@ -70,7 +70,7 @@ Placeholder reference (for kiro-postmortem-add):
 - ENTRY_ID: zero-padded 4-digit int, e.g. "0004" (next ID from ledger max + 1)
 - KEY: repo 修飾の変更キー e.g. "moira#16"（変更に紐づかない不具合は「該当なし」）。
       無修飾の "#N" を書かない（.kiro/steering/moira-change-analysis.md §8・D-80 の適用）
-- Schema: v2 固定（本テンプレートは 17 項目）。**既存の v1 entry（10 項目）は書き換えない**——
+- Schema: v2 固定（本テンプレートは 16 項目）。**既存の v1 entry（10 項目）は書き換えない**——
       読み取り側は v1/v2 の両方を受理し、v1 の欠落項目を unknown として集計に載せる
 - TITLE: 1-line summary of 事象
 - ISO_TIMESTAMP: e.g. "2026-07-25T13:45:00Z" (UTC at finalization)

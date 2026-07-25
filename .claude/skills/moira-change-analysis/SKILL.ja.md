@@ -2,7 +2,7 @@
 name: moira-change-analysis
 description: >
   変更管理の履歴（GitHub issue ＋ `moira/changes/issue-N/` 台帳 ＋ 実差分）から、変更 1 件ごとの
-  要因分析（17 項目）を起こし、横断集約して仕組み側の是正 Try に落とすオーケストレーション skill。
+  要因分析（16 項目）を起こし、横断集約して仕組み側の是正 Try に落とすオーケストレーション skill。
   「要因分析を回す」「振り返りをする」「変更履歴から要因分析」「未分析のを分析して」「定期の振り返り」
   などで起動。まず障害／非障害を受付で振り分け、障害の記録は `/kiro-postmortem-add` へ委譲する。
   規範は `.kiro/steering/moira-change-analysis.md`——本スキルは振り付けのみを所有し、規則の本文を
@@ -17,11 +17,11 @@ metadata:
 
 # moira-change-analysis — 変更の履歴を振り返り、仕組みの穴を見つける
 
-クローズ済みの変更 1 件を単位に、**障害か非障害かを受付で振り分け**、17 項目の分析票を
+クローズ済みの変更 1 件を単位に、**障害か非障害かを受付で振り分け**、16 項目の分析票を
 **出所ラベル付き**で起こし、両台帳を**横断集約**して、仕組み（skill・steering）側の是正 Try に落とす（A0〜A5）。
 
 **規範（正）は [`.kiro/steering/moira-change-analysis.md`](../../../.kiro/steering/moira-change-analysis.md)。**
-判定基準（障害／非障害・すり抜けギャップの入口フィルタ）・17 項目の定義・出所ラベル・タクソノミーの所在・
+判定基準（障害／非障害・すり抜けギャップの入口フィルタ）・16 項目の定義・出所ラベル・タクソノミーの所在・
 起動トリガ・保存先・正直枠の本文はすべて steering が所有する。本スキルは**操作手順（振り付け）だけ**を所有し、
 規則を複製しない——食い違えば steering が勝つ。
 
@@ -30,7 +30,7 @@ metadata:
 >    加わらない。
 > 2. **欄を捏造しない。** 根拠を示せない欄は `unknown` と書く。**空欄を answer のように見せることが、
 >    本スキルが防ぐために存在する唯一の失敗様式**である。
-> 3. **過去の記録を書き換えない。** 読み取りは `Schema: v1`（10 項目）と `v2`（17 項目）の両方を受理し、
+> 3. **過去の記録を書き換えない。** 読み取りは `Schema: v1`（10 項目）と `v2`（16 項目）の両方を受理し、
 >    **v1 entry を malformed として集計から落とさない**。
 > 4. **steering を直接書かない。** 承認された Try は既存の出口（`/kiro-steering-custom`／issue 起票 →
 >    `moira-change`）からのみ反映する。
@@ -59,8 +59,12 @@ metadata:
 3. **キーは repo 修飾**（`moira#16`）。旧リポ由来（`sdd-workshop#*`）は既定で対象外。
 4. **障害／非障害を判定**する（steering §2 の基準。境界事例は `障害` 側に倒す）。判定は AI がドラフトし、
    **HX で人間が確定**する——判定と根拠は必ず分析票の項目 3 に記録する（暗黙の振り分けを禁じる）。
-5. 欠陥検出を契機に積む場合は **steering §2.1 の「すり抜けギャップ」フィルタ**を通す
-   （「検知すべき工程 ≠ 実際に検知した工程」のみ。ラウンド内で決着した指摘・実装中のテスト失敗は積まない）。
+5. 欠陥検出を契機に**追加投入**する場合は **steering §2.1 の「すり抜けギャップ」フィルタ**を通す
+   （「検知すべき工程 ≠ 実際に検知した工程」のみ。ラウンド内で決着した指摘・実装中のテスト失敗は投入しない）。
+   **フィルタが掛かるのは この追加投入だけ**——P6 クローズ由来の母集団は間引かない（クローズした変更は全件が対象）。
+   通ったものは **その場で `.kiro/analysis/INDEX.md` の「すり抜け検出ログ」へ 1 行 append する**
+   （キューは算出値ゆえ「積む」だけでは観測が残らないため）。工程の判定は**投入時点では暫定でよい**
+   （分析時に項目 13/14 として確定する）。
 
 ### 2. A1 証跡収集（1 件ごと）
 
@@ -96,8 +100,10 @@ metadata:
 
 ### 5. A4 記録
 
-- **障害** → `Skill: kiro-postmortem-add` へ委譲（引き渡すのは確定済みの 17 項目と出所ラベル）。
+- **障害** → `Skill: kiro-postmortem-add` へ委譲（引き渡すのは確定済みの 16 項目と出所ラベル・`Source: analysis-intake`）。
   台帳は `.kiro/postmortem/defects.md`。**本スキルは同ファイルを直接編集しない。**
+  **委譲が完了したら、本スキルが `.kiro/analysis/INDEX.md` に 1 行 append する**（障害・非障害とも索引は
+  1 か所に集める。委譲先は `.kiro/analysis/` を触らない規律のため、書き手は本スキルである）。
 - **非障害** → `.kiro/analysis/entries/<repo>-<番号>.md` を Write ＋ `.kiro/analysis/INDEX.md` に 1 行 append
   （`templates/index-row.template.md`）。
 - どちらも `Schema: v2`・`status: ratified` で記録する。
@@ -112,6 +118,7 @@ metadata:
 
 2. 集約自体は `Skill: kiro-postmortem-review` へ委譲する（4 軸頻度・クラスタ・Try 抽出・steering hand-off は
    同 skill が所有）。**対象は両台帳**（`.kiro/postmortem/defects.md` ＋ `.kiro/analysis/entries/`）。
+   集約に載せた非障害 entry の `status` は `aggregated` になる（障害側は `reviewed`／`steered`——語彙を混ぜない）。
 3. 結果は `.kiro/analysis/reviews/<日付>.md`（`templates/aggregate-report.template.md`）。
 4. **HY Try 裁定**（人間）→ 採用分は既存の出口へ: `/kiro-steering-custom`（steering 反映）／
    `gh issue create` → `moira-change`（skill・確定文書の改訂）。**本スキルは確定文書を書き換えない。**

@@ -8,6 +8,11 @@
 > （MODEL・agreed シナリオ・agreed Decisions・PROPERTIES・steering）が勝つ。
 >
 > クローズ後もファイルは**削除しない・同期もしない**——issue が閉じた時点の記録としてそのまま残す。
+>
+> **限定（2026-07-25・issue #19）**: 「根拠として引用しない」が禁じるのは**現況の主張**である。
+> 「**その時点にそう記録されていた**」という事実の出典としての引用は可——要因分析
+> （[`.kiro/steering/moira-change-analysis.md`](../../.kiro/steering/moira-change-analysis.md)）は
+> 本台帳を `derived` の出典に使うが、それは当時の記録を写す用途であって現況の主張ではない。
 
 ## これは何か
 

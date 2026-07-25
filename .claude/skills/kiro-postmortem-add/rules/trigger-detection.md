@@ -13,27 +13,31 @@
 
 ---
 
-## 5 つのトリガー条件
+## 6 つのトリガー条件
+
+> **ID の正は [`.kiro/steering/moira-change-analysis.md`](../../../../.kiro/steering/moira-change-analysis.md) §6**——
+> 本ファイルは同じ ID の**判定ロジック**を持つ実装細目であり、ID・意味が食い違えば steering が勝つ。
 
 | ID | Trigger | 検出契機 | 自動提案対象 |
 |---|---|---|---|
 | (a) | `queue-threshold` | **未分析キューが 10 件以上**（キューは保存せず算出——「クローズ済み issue − 両台帳に entry のあるキー」） | ✅ AI が提案 |
 | (b) | `cluster-threshold` | 未レビューエントリ内で同じ `根本要因分類` ラベルまたは同じ `要因分類` ラベルが **2 件以上**に達した時点 | ✅ AI が提案 |
-| (c) | `periodic` | 前回の横断集約（`.kiro/analysis/reviews/` の最新ファイル日付）から **1 か月**経過 | ✅ AI が提案 |
-| (d) | `escaped-defect` | **すり抜けギャップのある欠陥**を検出（「検知すべき工程 ≠ 実際に検知した工程」。フィルタは `moira-change-analysis` §2.1）——**キューに積むだけ**で、この事象自体では起動提案しない | ❌（積むのみ） |
-| (e) | `user-explicit` | ユーザーが「振り返りしたい」「レビューして」等を明示要求した時点 | ❌ AI は提案不要 (ユーザーが直接起動) |
+| (c) | `periodic` | 前回の横断集約（`.kiro/analysis/reviews/` の最新ファイル日付）から **1 か月**経過。**集約が一度も無いときは発火させない**（初回に毎回鳴るのを避ける——その局面は (a) が担う） | ✅ AI が提案 |
+| (d) | `post-close` | `moira-change` P6 クローズ。**分析は走らせない**——クローズ自体が母集団入りを意味する（キューは算出値ゆえ「積む」操作は実体を持たない・正直開示） | ❌ |
+| (e) | `escaped-defect` | **すり抜けギャップのある欠陥**を検出（「検知すべき工程 ≠ 実際に検知した工程」。フィルタは `moira-change-analysis` §2.1）——**その場で `.kiro/analysis/INDEX.md` の「すり抜け検出ログ」に 1 行残す**。この事象自体では起動提案しない | ❌（記録のみ） |
+| (f) | `user-explicit` | ユーザーが「振り返りしたい」「レビューして」等を明示要求した時点 | ❌ AI は提案不要 (ユーザーが直接起動) |
 
-(e) は他トリガー条件成立の有無に関わらず常に許容される。
+(f) は他トリガー条件成立の有無に関わらず常に許容される。
 
-> **(d) が起動提案の対象でない理由**: 欠陥検出のたびに「起票しますか」と割り込むと、運用ごと嫌われる。
-> 検出は積むだけにし、起動は (a)(c)(e) が決める（D-84・D-85）。
+> **(e) が起動提案の対象でない理由**: 欠陥検出のたびに「起票しますか」と割り込むと、運用ごと嫌われる。
+> 検出は記録するだけにし、起動は (a)(b)(c)(f) が決める（D-84・D-85）。
 
 ---
 
 ## 判定ロジック (擬似コード)
 
 ```python
-def detect_review_triggers(ledger, analysis_index, closed_issues, session_context) -> list[str]:
+def detect_review_triggers(ledger, analysis_index, reviews_dir, closed_issues, session_context) -> list[str]:
     """
     /kiro-postmortem-add 完了直後 or AI 応答生成時に評価する。
     返り値の triggers が空でなければ AI は起動提案を出す。
@@ -41,8 +45,11 @@ def detect_review_triggers(ledger, analysis_index, closed_issues, session_contex
     triggers = []
 
     # (a) 未分析キューが 10 件以上（キューは保存せず毎回算出）
+    #     再オープン→再クローズされたキーは、entry の analyzed-at より後の closed なら未分析として再計上する
     analyzed_keys = analysis_index.keys | {e.key for e in ledger.entries if e.key}
-    queue = [i for i in closed_issues if qualified_key(i) not in analyzed_keys]
+    queue = [i for i in closed_issues
+             if qualified_key(i) not in analyzed_keys
+             or i.closed_at > analyzed_at(qualified_key(i))]
     if len(queue) >= 10:
         triggers.append("queue-threshold")
 
@@ -56,8 +63,10 @@ def detect_review_triggers(ledger, analysis_index, closed_issues, session_contex
     elif any(c >= 2 for c in cause_counts.values()):
         triggers.append("cluster-threshold")
 
-    # (c) 前回の横断集約から 1 か月経過
-    if last_review_date(analysis_index) is None or months_since(last_review_date(analysis_index)) >= 1:
+    # (c) 前回の横断集約から 1 か月経過（判定ソース = .kiro/analysis/reviews/ の最新ファイル日付）
+    #     集約が一度も無い（None）ときは発火させない
+    last = last_review_date(reviews_dir)
+    if last is not None and months_since(last) >= 1:
         triggers.append("periodic")
 
     return triggers
@@ -101,6 +110,6 @@ def detect_review_triggers(ledger, analysis_index, closed_issues, session_contex
 - 同トリガー条件で連続して提案するとノイズになる → セッション中 1 回提案して却下されたら、
   明確に状況が変化するまで再提案しない。
 - `(e) user-explicit` はトリガーリストに含めない (ユーザーが直接起動するため AI 提案は不要)。
-- AI は `.kiro/postmortem/defects.md` と `.kiro/analysis/INDEX.md` を Read してから判定する
+- AI は `.kiro/postmortem/defects.md`・`.kiro/analysis/INDEX.md` を Read し、`.kiro/analysis/reviews/` を `ls` してから判定する
   （頻度集計と未分析キューの算出は両台帳を読まないとできない）。
 - **未分析キューをファイルに保存しない**——保存すると台帳と GitHub の実状態がずれた瞬間に嘘の件数を出す（D-85）。

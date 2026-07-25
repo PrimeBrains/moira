@@ -1,6 +1,6 @@
 ---
 name: kiro-postmortem-add
-description: Append a defect entry to .kiro/postmortem/defects.md with 17 mandatory fields (対象システム / 事象 / 障害判定 / 変更分類 / 変更範囲 / 発生原因サマリ / 発生原因詳細 / 根本要因 / 同件調査対象 / 同件調査結果 / 同件の対応状況 / 再発防止策 / 検知すべき工程 / 実際に検知した工程 / 検知できなかった理由 / 検知するための対策), each carrying a provenance label. Use when a change has been judged a defect and its root cause is clarified — either proactively by the AI, on user demand, or delegated from the change-analysis intake (moira-change-analysis A0).
+description: Append a defect entry to .kiro/postmortem/defects.md with 16 mandatory fields (対象システム / 事象 / 障害判定 / 変更分類 / 変更範囲 / 発生原因サマリ / 発生原因詳細 / 根本要因 / 同件調査対象 / 同件調査結果 / 同件の対応状況 / 再発防止策 / 検知すべき工程 / 実際に検知した工程 / 検知できなかった理由 / 検知するための対策), each carrying a provenance label. Use when a change has been judged a defect and its root cause is clarified — either proactively by the AI, on user demand, or delegated from the change-analysis intake (moira-change-analysis A0).
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash
 argument-hint: <one-line defect summary, optional>
 metadata:
@@ -11,7 +11,7 @@ metadata:
 
 ## Role
 
-**障害**（不具合）1 件分を `.kiro/postmortem/defects.md` ledger に **17 項目埋めた構造化エントリ** として
+**障害**（不具合）1 件分を `.kiro/postmortem/defects.md` ledger に **16 項目埋めた構造化エントリ** として
 追記する skill。Plan-Do フェーズを担当。AI が能動的に提案、ユーザーが任意で起動、または
 要因分析フローの受付（`moira-change-analysis` A0）から**障害と判定された件が委譲**されてくる。
 
@@ -25,7 +25,7 @@ metadata:
 
 **Success Criteria**:
 
-- 全 17 項目が**出所ラベル付き**で埋まった entry が ledger 末尾に append される
+- 全 16 項目が**出所ラベル付き**で埋まった entry が ledger 末尾に append される
   （**根拠を示せない欄は `unknown` と記録する**——空欄・推測での穴埋めは禁止）
 - 既存 ledger 内容が byte-for-byte 保持される (append-only)
 - タクソノミー外ラベル入力時は同一操作の中で**正本**（`rules/taxonomy-reference.md`）＋ ledger ヘッダ要約を更新
@@ -52,7 +52,7 @@ metadata:
 
 ### Step 3: Draft 17 Fields
 
-証跡束・会話文脈・git diff・変更ファイルパスから 17 項目のドラフト値を推論する。
+証跡束・会話文脈・git diff・変更ファイルパスから 16 項目のドラフト値を推論する。
 **各項目に出所ラベルを付ける**——`derived`（履歴から写した・出典必須）／`inferred`（AI 推論・根拠必須）／
 `captured`（変更管理フロー実行時の一次記録）／`unknown`（埋められない）。
 
@@ -77,6 +77,11 @@ metadata:
 
 ### Step 4: User Confirmation Loop
 
+> **委譲時の縮退（重要）**: `Source: analysis-intake`（要因分析フロー A0 からの委譲）の場合、
+> 人間の確認対象は **HX の 4 群のみ**（障害判定・根本要因・再発防止策・検知対策）に縮退する——
+> 残りは**表示のみ**で、確認を求めない（規範 `.kiro/steering/moira-change-analysis.md` §1 HX）。
+> 直接起動（`Source: organic`）のときは従来どおり全フィールドを確認する。
+
 - 各フィールドのドラフト値と**出所ラベル**をユーザーに提示
 - ユーザーが確認 / 修正 / 拒否を選べる対話
 - タクソノミー外ラベルを入力した場合:
@@ -89,7 +94,7 @@ metadata:
 
 ### Step 5: Validation & Append
 
-- **必須 17 項目すべてが非空**であることを検証する。**`unknown` は有効な記入**（埋められないことの記録）であり、
+- **必須 16 項目すべてが非空**であることを検証する。**`unknown` は有効な記入**（埋められないことの記録）であり、
   空欄は不可——1 つでも空なら append を拒否し、欠落フィールドを明示してユーザーに戻す (Step 4 ループ)
 - 各項目に**出所ラベルが付いている**ことを検証する（欠けていれば同じく差し戻し）
 - 検証通過したら:
@@ -126,7 +131,7 @@ metadata:
 ## Critical Constraints
 
 - **Append-only**: 既存 ledger 内容を byte-for-byte 保持
-- **All-or-nothing**: 必須 17 項目すべてが非空になるまで append しない（`unknown` は非空として扱う）
+- **All-or-nothing**: 必須 16 項目すべてが非空になるまで append しない（`unknown` は非空として扱う）
 - **捏造禁止**: 根拠を示せない欄は `unknown`。**空欄を埋めるための推測を書かない**
 - **遡及書き換え禁止**: 既存 entry（`Schema: v1` = 旧 10 項目）を新様式へ書き換えない
 - **Partial-write 禁止**: ユーザーが mid-flow で却下したら何も書き込まない

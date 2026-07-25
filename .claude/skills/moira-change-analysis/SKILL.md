@@ -2,7 +2,7 @@
 name: moira-change-analysis
 description: >
   変更管理の履歴（GitHub issue ＋ `moira/changes/issue-N/` 台帳 ＋ 実差分）から、変更 1 件ごとの
-  要因分析（17 項目）を起こし、横断集約して仕組み側の是正 Try に落とすオーケストレーション skill。
+  要因分析（16 項目）を起こし、横断集約して仕組み側の是正 Try に落とすオーケストレーション skill。
   「要因分析を回す」「振り返りをする」「変更履歴から要因分析」「未分析のを分析して」「定期の振り返り」
   などで起動。まず障害／非障害を受付で振り分け、障害の記録は `/kiro-postmortem-add` へ委譲する。
   規範は `.kiro/steering/moira-change-analysis.md`——本スキルは振り付けのみを所有し、規則の本文を
@@ -21,10 +21,10 @@ Turn the change-management history into structured causal analyses. **A0** intak
 whether it was a **defect or not** — and records that verdict with its rationale, because an implicit
 sort would let "judged non-defect, so never recorded" vanish without a trace. Defects are delegated to
 the existing `/kiro-postmortem-add` (ledger `.kiro/postmortem/defects.md`); non-defects go to the new
-`.kiro/analysis/` ledger. **Both ledgers share one field definition (17 items) and one taxonomy source
+`.kiro/analysis/` ledger. **Both ledgers share one field definition (16 items) and one taxonomy source
 of truth**, so the cross-cutting aggregation (**A5**) can count across them.
 
-The honest core: **7 of the 17 fields are not present in the existing inputs at all** (defect verdict,
+The honest core: **7 of the 16 fields are not present in the existing inputs at all** (defect verdict,
 change class, root cause, prevention, and three detection-stage fields — established by auditing all
 existing ledgers under issue #19). So every field carries a **provenance label** — `derived` (copied
 from history, source path required), `inferred` (AI reconstruction after the fact, rationale required),
@@ -32,9 +32,11 @@ from history, source path required), `inferred` (AI reconstruction after the fac
 paper over a gap with a guess**). A human ratifies **four groups only**: defect verdict, root cause
 (with mechanism attribution), prevention, and detection countermeasure.
 
-Intake is filtered by **escape, not by detector** (D-84): a finding counts only when the stage that
-*should* have caught it differs from the stage that *did* — an adversarial round catching a draft
-defect is the process working, not a defect to record. Analysis never runs per close: items are queued,
+Intake is filtered by **escape, not by detector** (D-84) — **but only for defect-triggered additions**:
+a finding is added only when the stage that *should* have caught it differs from the stage that *did*;
+an adversarial round catching a draft defect is the process working, not a defect to record. The
+close-driven population (every closed change) is **not** filtered this way. Escapes are logged where
+they are seen, because a computed queue cannot remember them. Analysis never runs per close: items are queued,
 and the run is proposed (never auto-started) once the queue reaches ten, a month passes, or the user asks.
 
 > **Hard guardrails (highest priority):**
@@ -43,7 +45,7 @@ and the run is proposed (never auto-started) once the queue reaches ten, a month
 > 2. **Never fabricate a field.** A field without evidence is `unknown`. An empty cell dressed up as
 >    an answer is the one failure mode this skill exists to prevent.
 > 3. **Never rewrite past records.** Older entries keep their original schema; readers accept both
->    `Schema: v1` (10 fields) and `v2` (17) and must not drop v1 entries as malformed.
+>    `Schema: v1` (10 fields) and `v2` (16) and must not drop v1 entries as malformed.
 > 4. **Never write steering directly.** Approved Tries leave through the existing exits
 >    (`/kiro-steering-custom`, or an issue routed through `moira-change`).
 > 5. **Never start unasked.** The AI proposes in one line; the human starts the run.
@@ -52,7 +54,7 @@ and the run is proposed (never auto-started) once the queue reaches ten, a month
 [`SKILL.ja.md`](./SKILL.ja.md)** (project language), which in turn defers to
 [`.kiro/steering/moira-change-analysis.md`](../../../.kiro/steering/moira-change-analysis.md) as the
 canonical rule text. To avoid a second source of truth, the procedure is NOT duplicated here — the
-intake criteria (defect vs. non-defect, the escape filter), the 17 field definitions, the taxonomy
+intake criteria (defect vs. non-defect, the escape filter), the 16 field definitions, the taxonomy
 location, the triggers, and the honest limits all belong to the steering document; if they ever
 disagree, steering wins.
 
