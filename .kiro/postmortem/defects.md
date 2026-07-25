@@ -138,7 +138,7 @@ AI は (a) / (b) / (c) を検出時に 1 行で提案する。**AI は ユーザ
 
 ### 0001: sdd-issue-creator サブエージェントが gh 実行ログと成功 JSON を丸ごと捏造
 
-Status: recorded
+Status: reviewed
 Entry ID: 0001
 Created: 2026-07-05T11:45:42Z
 Source: organic
@@ -187,7 +187,7 @@ verification-gap
 
 ### 0002: 履歴移管後も確定文書に旧リポ（sdd-workshop）チェックアウト前提の記述と直リンクが残存
 
-Status: recorded
+Status: reviewed
 Entry ID: 0002
 Key: moira#5
 Schema: v2
@@ -258,7 +258,7 @@ filter-repo による履歴移管（sdd-workshop#42）はコミット履歴と�
 
 ### 0003: 受け入れシナリオ unit の相対リンク 23 本が解決不能（深度誤り 14・不存在先 9）
 
-Status: recorded
+Status: reviewed
 Entry ID: 0003
 Key: moira#8
 Schema: v2
@@ -329,7 +329,7 @@ CI にリンク解決の検査器が存在しなかったため、機械が見�
 
 ### 0004: 訂正計器③「遡及」の意味が正典・批准済み意図・実装の三者でずれたまま実装が進行
 
-Status: recorded
+Status: reviewed
 Entry ID: 0004
 Key: moira#11
 Schema: v2
@@ -399,7 +399,7 @@ HA が「意図を批准する」工程として設計されており、「批�
 
 ### 0005: cli の単体テストが開発者シェルの MOIRA_DIR を継承し、実運用中の events.json を破壊した
 
-Status: recorded
+Status: reviewed
 Entry ID: 0005
 Key: moira#13
 Schema: v2
@@ -470,7 +470,7 @@ CI は `MOIRA_DIR` が未設定の環境で走るため、隔離破れが**構�
 
 ### 0006: 正典 §2.10 が列挙する適用不能 4 例のうち 3 例が未検証、かつ corrections.json が並行書き込み無保護
 
-Status: recorded
+Status: reviewed
 Entry ID: 0006
 Key: moira#15
 Schema: v2
@@ -541,7 +541,7 @@ issue #6 で §2.10 の参照実装同期を行った際、pre-admission 検証�
 
 ### 0007: events.json の書き込みが素の writeFileSync で torn write と lost update の両方に露出
 
-Status: recorded
+Status: reviewed
 Entry ID: 0007
 Key: moira#16
 Schema: v2
@@ -614,7 +614,7 @@ C（R1–R6）・M（R7: MODEL §7#20 追補）・D（R8: D-79 注記）・P（R
 
 ### 0008: .moira 残余 6 ファイルが同型の torn write／lost update に露出（うち 1 経路はゲート再レビューで初めて発覚）
 
-Status: recorded
+Status: reviewed
 Entry ID: 0008
 Key: moira#17
 Schema: v2

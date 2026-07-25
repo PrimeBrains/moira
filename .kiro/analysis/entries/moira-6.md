@@ -1,7 +1,7 @@
 ---
 key: moira#6
 schema: v2
-status: ratified
+status: aggregated
 analyzed-at: 2026-07-25
 verdict: 非障害
 ---
