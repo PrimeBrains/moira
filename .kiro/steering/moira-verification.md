@@ -164,5 +164,6 @@
 - **変更を通し終えた後の振り返り（要因分析）→ [moira-change-analysis.md](moira-change-analysis.md)＋skill `moira-change-analysis`。
   ただしこれは計器ではない**——事後分析であり、計器①〜⑥のいずれにも加わらず、合否を出さず、変更を止めない
   （2026-07-25・issue #19）。本表のゲート群と混同しないこと。なお各ゲートの**ラウンド内で決着した指摘**は
-  要因分析の母集団に**入らない**（「検知すべき工程 ≠ 実際に検知した工程」のすり抜けギャップのみが入口・D-84）。
+  要因分析の**入口にしない**（「検知すべき工程 ≠ 実際に検知した工程」のすり抜けギャップのみが入口・D-84）。
+  ※**当該変更自体はクローズ時に母集団へ入る**——入口フィルタは母集団を間引く規則ではない。
 - 関連: [moira-model.md](moira-model.md) ／ [moira-naming.md](moira-naming.md) ／ [testing-conventions.md](testing-conventions.md) ／ `moira/MODEL.md` ／ `moira/PROPERTIES.md` ／ `moira/DECISIONS-CATALOG.md`（人間レビュー目録） ／ `moira/DECISIONS.md`（意思決定ジャーナル＝来歴） ／ `.kiro/scenarios/README.md`。

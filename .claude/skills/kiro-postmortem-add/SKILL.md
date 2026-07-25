@@ -58,7 +58,7 @@ metadata:
 
 | Field | 推論方法 |
 |---|---|
-| 1. 対象システム | 変更ファイルパス → `backend`（`moira/backend/`）／`frontend`（`moira/frontend/src/...`）／`cli`（`moira/cli/`）／`adapter`／`process`（`.claude/skills/`・`.kiro/steering/`・確定文書） |
+| 1. 対象システム | 変更ファイルパス → `backend`（`moira/backend/`）／`frontend`（`moira/frontend/src/...`）／`cli`（`moira/cli/`）／`adapter`／`process`（`.claude/skills/`・`.kiro/steering/`・確定文書）。**本表は path→label の写像であり値集合の定義ではない**——`other` はパスを持たないため写像表に現れない。ラベルの正本は `rules/taxonomy-reference.md` R13 |
 | 2. 事象 | Given/When/Then ＋ 期待値・実際値。症状の報告・witness テストの落ち方から起こす |
 | 3. 障害判定 | 本 ledger は `障害` のみ（A0 の判定を転記し、根拠を添える） |
 | 4. 変更分類 | 是正なら `bugfix`。仕組み側の是正なら `process-improve` 等 |

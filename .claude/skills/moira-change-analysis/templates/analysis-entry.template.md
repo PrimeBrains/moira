@@ -34,7 +34,8 @@ verdict: {{障害|非障害}}
 
 ## 1. 対象システム　`{{PROVENANCE}}`
 
-{{backend | frontend | cli | adapter | process}}（複数可）＋サブスコープ
+{{LABEL}}（複数可）＋サブスコープ　<!-- ラベルは正本 R13 から:
+     .claude/skills/kiro-postmortem-add/rules/taxonomy-reference.md（値をここに列挙しない） -->
 出典: {{SOURCE}}
 
 ## 2. 事象　`{{PROVENANCE}}`

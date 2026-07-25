@@ -83,7 +83,8 @@ Placeholder reference (for kiro-postmortem-add):
   unknown   = 埋められない。**空欄・推測での穴埋めを禁じる**——本文に "unknown" と書く
 
 【各項目】
-- TARGET_SYSTEM: backend / frontend / cli / adapter / process（複数可）＋任意サブスコープ
+- TARGET_SYSTEM: **正本 R13（`rules/taxonomy-reference.md`）のラベル**から。複数可＋任意サブスコープ
+      （値集合をここに列挙しない——正本の複製を作らないため）
 - 2. 事象: Given/When/Then ＋ 期待値／実際値
 - VERDICT_RATIONALE: 「意図した仕様・約束されたふるまいから外れた状態が実在した」根拠
       （潜在＝未発現の欠陥も障害。境界事例は障害側に倒す）
